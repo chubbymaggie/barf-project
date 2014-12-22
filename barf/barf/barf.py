@@ -5,7 +5,6 @@ BARF : Binary Analysis Framework.
 import logging
 import os
 import time
-
 import arch
 
 from analysis.basicblock import BasicBlockBuilder
@@ -21,6 +20,7 @@ from core.bi import BinaryFile
 from core.reil import ReilEmulator
 from core.smt.smtlibv2 import Z3Solver
 from core.smt.smtlibv2 import CVC4Solver
+from core.dbg.debugger import ProcessControl, ProcessExit, ProcessSignal, ProcessEnd
 
 from core.smt.smttranslator import SmtTranslator
 
@@ -33,7 +33,8 @@ logging.basicConfig(
 verbose = False
 
 # Choose between SMT Solvers...
-SMT_SOLVER  = "Z3"
+SMT_SOLVER = None
+#SMT_SOLVER  = "Z3"
 # SMT_SOLVER  = "CVC4"
 
 class BARF(object):
@@ -88,17 +89,19 @@ class BARF(object):
                 self.smt_solver = Z3Solver()
             elif SMT_SOLVER == "CVC4":
                 self.smt_solver = CVC4Solver()
-            else:
+            elif SMT_SOLVER is not None:
                 raise Exception("Invalid SMT solver.")
 
-            self.smt_translator = SmtTranslator(self.smt_solver, self.arch_info.address_size)
+            if SMT_SOLVER is not None:
+              self.smt_translator = SmtTranslator(self.smt_solver, self.arch_info.address_size)
 
             self.ir_emulator.set_arch_registers(self.arch_info.registers_gp)
             self.ir_emulator.set_arch_registers_size(self.arch_info.register_size)
             self.ir_emulator.set_reg_access_mapper(self.arch_info.register_access_mapper())
 
-            self.smt_translator.set_reg_access_mapper(self.arch_info.register_access_mapper())
-            self.smt_translator.set_arch_registers_size(self.arch_info.register_size)
+            if SMT_SOLVER is not None:
+                self.smt_translator.set_reg_access_mapper(self.arch_info.register_access_mapper())
+                self.smt_translator.set_arch_registers_size(self.arch_info.register_size)
 
     def _setup_analysis_modules(self):
         """Set up analysis modules.
@@ -130,6 +133,33 @@ class BARF(object):
             self.text_section = self.binary.text_section
 
             self._load()
+
+
+    def execute(self,ea_start=None, ea_end=None):
+
+        pcontrol = ProcessControl()
+        process = pcontrol.start_process(self.binary,ea_start,ea_end)
+
+        self.ir_translator.reset()
+
+        while pcontrol:
+            addr = process.getInstrPointer()
+            ins = process.readBytes(addr, 20)
+
+            asm, size = self.disassembler.disassemble(ins, addr)
+            yield addr-size, asm, self.ir_translator.translate(asm)
+
+            process.singleStep()
+            event = pcontrol.wait_event()
+            if isinstance(event, ProcessExit):
+                print "process exit"
+                break
+            if isinstance(event, ProcessEnd):
+                print "process end"
+                break
+            #if (isinstance(event, ProcessSignal) and
+            #    event.signum & ~128 != signal.SIGTRAP):
+            #    print "died with signal %i" % event.signum
 
     def translate(self, ea_start=None, ea_end=None):
         """Translate to REIL instructions.
