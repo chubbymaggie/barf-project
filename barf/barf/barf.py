@@ -4,6 +4,7 @@ BARF : Binary Analysis Framework.
 """
 import logging
 import os
+import sys
 import time
 import arch
 
@@ -21,6 +22,7 @@ from core.reil import ReilEmulator
 from core.smt.smtlibv2 import Z3Solver
 from core.smt.smtlibv2 import CVC4Solver
 from core.dbg.debugger import ProcessControl, ProcessExit, ProcessSignal, ProcessEnd
+from core.dbg.testcase import GetTestcase, prepare_inputs
 
 from core.smt.smttranslator import SmtTranslator
 
@@ -121,13 +123,21 @@ class BARF(object):
 
     # ======================================================================== #
 
-    def open(self, filename):
+    def open(self, path):
         """Open a file for analysis.
 
         :param filename: name of an executable file
         :type filename: str
 
         """
+        self.testcase = None
+
+        if os.path.isdir(path):
+            self.testcase = GetTestcase(path)
+            filename = self.testcase["filename"]
+        else:
+            filename = path
+
         if filename:
             self.binary = BinaryFile(filename)
             self.text_section = self.binary.text_section
@@ -137,8 +147,15 @@ class BARF(object):
 
     def execute(self,ea_start=None, ea_end=None):
 
+
+        if self.testcase is None:
+            print "No testcase specified. Execution impossible"
+            sys.exit(-1)
+
+        binary = self.binary
+        args = prepare_inputs(self.testcase["args"] + self.testcase["files"])
         pcontrol = ProcessControl()
-        process = pcontrol.start_process(self.binary,ea_start,ea_end)
+        process = pcontrol.start_process(binary,args,ea_start,ea_end)
 
         self.ir_translator.reset()
 
