@@ -35,8 +35,8 @@ logging.basicConfig(
 verbose = False
 
 # Choose between SMT Solvers...
-SMT_SOLVER = None
-#SMT_SOLVER  = "Z3"
+# SMT_SOLVER = None
+SMT_SOLVER  = "Z3"
 # SMT_SOLVER  = "CVC4"
 
 class BARF(object):
@@ -102,8 +102,8 @@ class BARF(object):
             self.ir_emulator.set_reg_access_mapper(self.arch_info.registers_access_mapper())
 
             if SMT_SOLVER is not None:
-                self.smt_translator.set_reg_access_mapper(self.arch_info.register_access_mapper())
-                self.smt_translator.set_arch_registers_size(self.arch_info.register_size)
+                self.smt_translator.set_reg_access_mapper(self.arch_info.registers_access_mapper())
+                self.smt_translator.set_arch_registers_size(self.arch_info.registers_size)
 
     def _setup_analysis_modules(self):
         """Set up analysis modules.
