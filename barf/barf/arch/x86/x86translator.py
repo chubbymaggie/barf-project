@@ -129,15 +129,27 @@ class TranslationBuilder(object):
     def _resolve_loops(self, instrs):
         idx_by_labels = {}
 
-        # Collect labels.
-        curr = 0
-        for index, instr in enumerate(instrs):
-            if isinstance(instr, Label):
-                idx_by_labels[instr.name] = curr
+        # # Collect labels.
+        # curr = 0
+        # for index, instr in enumerate(instrs):
+        #     if isinstance(instr, Label):
+        #         idx_by_labels[instr.name] = curr
 
-                del instrs[index]
+        #         del instrs[index]
+        #     else:
+        #         curr += 1
+
+        # TODO: Hack to avoid deleting while iterating
+        instrs_no_labels = []
+        curr = 0
+        for i in instrs:
+            if isinstance(i, Label):
+                idx_by_labels[i.name] = curr
             else:
+                instrs_no_labels.append(i)
                 curr += 1
+
+        instrs[:] = instrs_no_labels
 
         # Resolve instruction addresses and JCC targets.
         for index, instr in enumerate(instrs):
@@ -345,8 +357,8 @@ class X86Translator(object):
                 check_operands_size(instr, self._arch_info.architecture_size)
             except:
                 logger.error(
-                    "Invalid operand size: %s (%s)", 
-                    instr, 
+                    "Invalid operand size: %s (%s)",
+                    instr,
                     instruction
                 )
 
@@ -415,7 +427,7 @@ class X86Translator(object):
 
     def _extract_bit(self, tb, reg, bit):
         assert(bit >= 0 and bit < reg.size)
-        
+
         tmp = tb.temporal(reg.size)
         ret = tb.temporal(1)
 
@@ -569,6 +581,54 @@ class X86Translator(object):
         oprnd1 = tb.read(instruction.operands[1])
 
         tb.write(instruction.operands[0], oprnd1)
+
+    def _translate_cmovb(self, tb, instruction):
+        # Move if below (CF=1).
+        # Flags Affected
+        # None.
+
+        oprnd0 = tb.read(instruction.operands[0])
+        oprnd1 = tb.read(instruction.operands[1])
+
+        imm0 = tb.immediate(1, 1)
+
+        tmp0 = tb.temporal(oprnd1.size)
+
+        move_lbl = Label('move')
+        exit_lbl = Label('exit')
+
+        tb.add(self._builder.gen_jcc(self._flags["cf"], move_lbl))
+        tb.add(self._builder.gen_str(oprnd0, tmp0))     # keep current value
+        tb.add(self._builder.gen_jcc(imm0, exit_lbl))
+        tb.add(move_lbl)
+        tb.add(self._builder.gen_str(oprnd1, tmp0))     # set new value
+        tb.add(exit_lbl)
+
+        tb.write(instruction.operands[0], tmp0)
+
+    def _translate_cmove(self, tb, instruction):
+        # Move if equal (ZF=1).
+        # Flags Affected
+        # None.
+
+        oprnd0 = tb.read(instruction.operands[0])
+        oprnd1 = tb.read(instruction.operands[1])
+
+        imm0 = tb.immediate(1, 1)
+
+        tmp0 = tb.temporal(oprnd1.size)
+
+        move_lbl = Label('move')
+        exit_lbl = Label('exit')
+
+        tb.add(self._builder.gen_jcc(self._flags["zf"], move_lbl))
+        tb.add(self._builder.gen_str(oprnd0, tmp0))     # keep current value
+        tb.add(self._builder.gen_jcc(imm0, exit_lbl))
+        tb.add(move_lbl)
+        tb.add(self._builder.gen_str(oprnd1, tmp0))     # set new value
+        tb.add(exit_lbl)
+
+        tb.write(instruction.operands[0], tmp0)
 
     def _translate_xchg(self, tb, instruction):
         # Flags Affected
@@ -1669,7 +1729,7 @@ class X86Translator(object):
         temp_count = tb.temporal(oprnd0.size)
         zero = tb.immediate(0, oprnd0.size)
 
-        # TODO: Improve this translation. It uses unecessary large 
+        # TODO: Improve this translation. It uses unecessary large
         # register...
         tmp_cf_ext = tb.temporal(oprnd0.size * 4)
         tmp_cf_ext_1 = tb.temporal(oprnd0.size * 4)
@@ -1801,6 +1861,21 @@ class X86Translator(object):
 
         # Flags : AF
         self._undefine_flag(tb, self._flags["af"])
+
+    def _translate_seta(self, tb, instruction):
+        # Set byte if above (CF=0 and ZF=0)
+
+        imm0 = tb.immediate(1, 1)
+
+        tmp0 = tb.temporal(1)
+        tmp1 = tb.temporal(1)
+        tmp2 = tb.temporal(instruction.operands[0].size)
+
+        tb.add(self._builder.gen_xor(self._flags["cf"], imm0, tmp0))
+        tb.add(self._builder.gen_xor(self._flags["zf"], imm0, tmp1))
+        tb.add(self._builder.gen_and(tmp0, tmp1, tmp2))
+
+        tb.write(instruction.operands[0], tmp2)
 
     def _translate_setne(self, tb, instruction):
         # Set byte if not equal (ZF=0).
