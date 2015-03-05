@@ -4,10 +4,12 @@ Binary Interface Module.
 
 import subprocess
 import re
+import os
 
 from pefile import PE
 from pybfd.bfd import Bfd
 
+import misc as misc
 import barf.arch as arch
 
 class Memory(object):
@@ -38,7 +40,7 @@ class Memory(object):
                     val += self.read_function(addr, 0x1)[0]
             except IndexError as reason:
                 print "[-] Index out of range : %s" % hex(addr)
-                raise IndexError(reason)
+                #raise IndexError(reason)
         elif isinstance(key, int):
             val += self.read_function(key, 0x1)[0]
         else:
@@ -76,6 +78,13 @@ class BinaryFile(object):
         # Open file
         if filename:
             self._open(filename)
+
+
+    @property
+    def start_address(self):
+        """Get start address of section .text.
+        """
+        return self._start_address
 
     @property
     def ea_start(self):
@@ -121,6 +130,7 @@ class BinaryFile(object):
         """
         return self._section_text_memory
 
+
     def _open(self, filename):
         # # open file
         # bfd = Bfd(filename)
@@ -138,9 +148,15 @@ class BinaryFile(object):
         # self._arch_mode = self._map_architecture_mode(bfd.arch_size)
 
         try:
+
             bfd = Bfd(filename)
 
             self._sections = bfd.sections
+            self._start_address = bfd.start_address
+
+            # imperfect but good enough shared object detection according to:
+            # https://stackoverflow.com/questions/16302575/distinguish-shared-objects-from-position-independent-executables
+            self.is_shared_object = (".interp" not in self._sections) or ("libc.so.6" in self.filename)
 
             self._populate_plt_got(filename,0x0)
 
@@ -155,9 +171,21 @@ class BinaryFile(object):
             # get arch and arch mode
             self._arch = self._map_architecture(bfd.architecture_name)
             self._arch_mode = self._map_architecture_mode(bfd.arch_size)
+            self.libs = dict()
+
+            if not self.is_shared_object:
+
+                self._populate_libraries_ldd()
+                #print self.libs.keys()
+                for lib in self._libs:
+                    if "/usr/lib/" in lib:
+                        #print lib
+                        lib = os.path.realpath(lib)
+                        self.libs[lib] = BinaryFile(lib)
+
         except Exception:
             print "BFD could not open the file."
-            #pass
+            pass
 
         try:
             pe = PE(filename)
@@ -195,7 +223,23 @@ class BinaryFile(object):
             raise Exception("Could not open the file.")
 
 
+    def _populate_libraries_ldd(self):
+        """
+        from pwntools
+        """
+        try:
+            cmd = '(ulimit -s unlimited; ldd %s > /dev/null && (LD_TRACE_LOADED_OBJECTS=1 %s || ldd %s)) 2>/dev/null'
+            arg = misc.sh_string(self.filename)
+
+            data = subprocess.check_output(cmd % (arg, arg, arg), shell = True)
+            self._libs = misc.parse_ldd_output(data)
+        except subprocess.CalledProcessError:
+            self._libs = {}
+
     def _populate_plt_got(self, path, base):
+        """
+        from pwntools
+        """
         plt, got = dict(), dict()
 
         cmd = ['/usr/bin/objdump', '-d', path]
