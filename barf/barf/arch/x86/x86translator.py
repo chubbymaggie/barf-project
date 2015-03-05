@@ -2406,6 +2406,94 @@ class X86Translator(object):
 
 # "String Instructions"
 # ============================================================================ #
+    def _translate_stosb(self, tb, instruction):
+
+        prefix = instruction.prefix
+
+        oprnd0 = tb.read(instruction.operands[0])
+
+        end_addr = ReilImmediateOperand((instruction.address + instruction.size) << 8, 40)
+
+        loop_start_lbl = Label('loop_start')
+
+        if self.address_size == 16:
+            counter = ReilRegisterOperand("cx", 16)
+        elif self.address_size == 32:
+            counter = ReilRegisterOperand("ecx", 32)
+        elif self.address_size == 64:
+            counter = ReilRegisterOperand("rcx", 64)
+        else:
+            raise Exception("Invalid address size: %d", self.address_size)
+
+        if self._arch_mode == ARCH_X86_MODE_32:
+            dst = ReilRegisterOperand("edi", 32)
+        elif self._arch_mode == ARCH_X86_MODE_64:
+            dst = ReilRegisterOperand("rdi", 64)
+        else:
+            raise Exception("Invalid architecture mode: %d", self._arch_mode)
+
+        imm1 = tb.immediate(counter.size)
+        imm2 = tb.immediate(1, 1)
+
+        tmp0 = tb.temporal(counter.size)
+        tmp1 = tb.temporal(1)
+        tmp2 = tb.temporal(1)
+
+        tb.add(loop_start_lbl)
+
+        tb.add(self._builder.gen_bisz(counter, tmp1))
+        tb.add(self._builder.gen_jcc(tmp1, end_addr))
+
+        # Instruction translation #
+        # DEST ← AL;
+        # IF DF = 0
+        #     THEN (E)DI ← (E)DI + 1;
+        #     ELSE (E)DI ← (E)DI – 1;
+        # FI;
+
+        tmp3 = tb.temporal(1)
+
+        src = ReilRegisterOperand("al", 8)
+
+        imm_tmp = tb.immediate(1, dst.size)
+        dst_tmp = tb.temporal(dst.size)
+
+        forward_lbl = Label('forward')
+        backward_lbl = Label('backward')
+        continue_lbl = Label('continue')
+
+        # Move data
+        tb.add(self._builder.stm(dst, src))
+
+        # Update dst pointer
+        tb.add(self._builder.gen_bisz(self._flags["df"], tmp3))
+        tb.add(self._builder.gen_jcc(tmp3, forward_lbl))
+
+        tb.add(forward_lbl)
+        tb.add(self._builder.gen_add(dst, imm_tmp, dst_tmp))
+        tb.add(self._builder.gen_str(dst_tmp, dst))
+        tb.add(self._builder.gen_jcc(imm2, continue_lbl))
+        tb.add(backward_lbl)
+        tb.add(self._builder.gen_sub(dst, imm_tmp, dst_tmp))
+        tb.add(self._builder.gen_str(dst_tmp, dst))
+        tb.add(continue_lbl)
+
+        # ----------------------- #
+
+        tb.add(self._builder.gen_sub(counter, imm1, tmp0))
+        tb.add(self._builder.gen_str(tmp0, counter))
+        tb.add(self._builder.gen_bisz(counter, tmp1))
+        tb.add(self._builder.gen_jcc(tmp1, end_addr))
+
+        if prefix in ["repz", "repe"]:
+            tb.add(self._builder.gen_xor(self._flags["zf"], imm2, tmp2))
+        elif prefix in ["repnz", "repne"]:
+            tb.add(self._builder.gen_str(self._flags["zf"], tmp2))
+        else:
+            raise Exception("Invalid prefix: %s" % prefix)
+
+        tb.add(self._builder.gen_jcc(tmp2, end_addr))
+        tb.add(self._builder.gen_jcc(imm2, loop_start_lbl))
 
 # "I/O Instructions"
 # ============================================================================ #
