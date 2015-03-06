@@ -2406,7 +2406,22 @@ class X86Translator(object):
 
 # "String Instructions"
 # ============================================================================ #
+    def _translate_stos(self, tb, instruction):
+        self._translate_stosb(self, tb, instruction)
+
     def _translate_stosb(self, tb, instruction):
+        self._translate_stos_suffix(tb, instruction, "b")
+
+    def _translate_stosw(self, tb, instruction):
+        self._translate_stos_suffix(tb, instruction, "w")
+
+    def _translate_stosd(self, tb, instruction):
+        self._translate_stos_suffix(tb, instruction, "d")
+
+    def _translate_stosq(self, tb, instruction):
+        self._translate_stos_suffix(tb, instruction, "q")
+
+    def _translate_stos_suffix(self, tb, instruction, suffix):
         # DEST <- AL;
         # IF DF = 0
         #     THEN (E)DI <- (E)DI + 1;
@@ -2417,7 +2432,16 @@ class X86Translator(object):
         end_addr = ReilImmediateOperand((instruction.address + instruction.size) << 8, 40)
 
         # Define source register.
-        src = ReilRegisterOperand("al", 8)
+        if suffix == 'b':
+            src = ReilRegisterOperand("al", 8)
+        elif suffix == 'w':
+            src = ReilRegisterOperand("ax", 16)
+        elif suffix == 'd':
+            src = ReilRegisterOperand("eax", 32)
+        elif suffix == 'q':
+            src = ReilRegisterOperand("rax", 64)
+        else:
+            raise Exception("Invalid instruction suffix: %s" % suffix)
 
         # Define destination register.
         if self._arch_mode == ARCH_X86_MODE_32:
@@ -2437,7 +2461,7 @@ class X86Translator(object):
 
         # Define temporary registers
         df_zero = tb.temporal(1)
-        imm_tmp = tb.immediate(1, dst.size)
+        imm_tmp = tb.immediate(src.size/8, dst.size)
         dst_tmp = tb.temporal(dst.size)
 
         if instruction.prefix:
