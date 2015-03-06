@@ -2406,6 +2406,89 @@ class X86Translator(object):
 
 # "String Instructions"
 # ============================================================================ #
+    def _update_strings_src(self, tb, src, size):
+        self._update_strings_dst(tb, src, size)
+
+    def _update_strings_srcs(self, tb, src1, src2, size):
+        self._update_strings_src_and_dst(tb, src1, src2, size)
+
+    def _update_strings_dst(self, tb, dst, size):
+        # Create labels.
+        forward_lbl = Label('forward')
+        backward_lbl = Label('backward')
+        continue_lbl = Label('continue')
+
+        # Define immediate registers.
+        imm_one = tb.immediate(1, 1)
+
+        # Define temporary registers.
+        df_zero = tb.temporal(1)
+        imm_tmp = tb.immediate(size/8, dst.size)
+        dst_tmp = tb.temporal(dst.size)
+
+        # Update destination pointer.
+        tb.add(self._builder.gen_bisz(self._flags["df"], df_zero))
+        tb.add(self._builder.gen_jcc(df_zero, forward_lbl))
+
+        # Update backwards.
+        tb.add(backward_lbl)
+        tb.add(self._builder.gen_sub(dst, imm_tmp, dst_tmp))
+        tb.add(self._builder.gen_str(dst_tmp, dst))
+
+        # Jump to next instruction.
+        tb.add(self._builder.gen_jcc(imm_one, continue_lbl))
+
+        # Update forwards.
+        tb.add(forward_lbl)
+        tb.add(self._builder.gen_add(dst, imm_tmp, dst_tmp))
+        tb.add(self._builder.gen_str(dst_tmp, dst))
+
+        # Continuation label.
+        tb.add(continue_lbl)
+
+    def _update_strings_src_and_dst(self, tb, src, dst, size):
+        # Create labels.
+        forward_lbl = Label('forward')
+        backward_lbl = Label('backward')
+        continue_lbl = Label('continue')
+
+        # Define immediate registers.
+        imm_one = tb.immediate(1, 1)
+
+        # Define temporary registers.
+        df_zero = tb.temporal(1)
+        imm_tmp = tb.immediate(size/8, src.size)
+        src_tmp = tb.temporal(src.size)
+        dst_tmp = tb.temporal(dst.size)
+
+        # Update destination pointer.
+        tb.add(self._builder.gen_bisz(self._flags["df"], df_zero))
+        tb.add(self._builder.gen_jcc(df_zero, forward_lbl))
+
+        # Update backwards.
+        tb.add(backward_lbl)
+        # src
+        tb.add(self._builder.gen_sub(src, imm_tmp, src_tmp))
+        tb.add(self._builder.gen_str(src_tmp, src))
+        # dst
+        tb.add(self._builder.gen_sub(dst, imm_tmp, dst_tmp))
+        tb.add(self._builder.gen_str(dst_tmp, dst))
+
+        # Jump to next instruction.
+        tb.add(self._builder.gen_jcc(imm_one, continue_lbl))
+
+        # Update forwards.
+        tb.add(forward_lbl)
+        # src
+        tb.add(self._builder.gen_add(src, imm_tmp, src_tmp))
+        tb.add(self._builder.gen_str(src_tmp, src))
+        # dst
+        tb.add(self._builder.gen_add(dst, imm_tmp, dst_tmp))
+        tb.add(self._builder.gen_str(dst_tmp, dst))
+
+        # Continuation label.
+        tb.add(continue_lbl)
+
     def _translate_cmps(self, tb, instruction):
         self._translate_cmpsb(self, tb, instruction)
 
@@ -2441,9 +2524,6 @@ class X86Translator(object):
         #       FI;
         # FI;
 
-        # Define instruction's end address.
-        end_addr = ReilImmediateOperand((instruction.address + instruction.size) << 8, 40)
-
         # Define data size.
         if suffix == 'b':
             data_size = 8
@@ -2472,26 +2552,13 @@ class X86Translator(object):
         else:
             raise Exception("Invalid architecture mode: %d", self._arch_mode)
 
-        # Create labels.
-        forward_lbl = Label('forward')
-        backward_lbl = Label('backward')
-        continue_lbl = Label('continue')
-
-        # Define immediate registers.
-        imm_one = tb.immediate(1, 1)
-
         # Define temporary registers
-        df_zero = tb.temporal(1)
-        imm_tmp = tb.immediate(src1.size/8, src1.size)
         src1_data = tb.temporal(data_size)
         src2_data = tb.temporal(data_size)
-        src1_tmp = tb.temporal(src1.size)
-        src2_tmp = tb.temporal(src2.size)
-
         tmp0 = tb.temporal(data_size*2)
 
         if instruction.prefix:
-            counter, loop_start_lbl = self._rep_prefix_begin(tb, end_addr)
+            counter, loop_start_lbl = self._rep_prefix_begin(tb, instruction)
 
         # Instruction
         # -------------------------------------------------------------------- #
@@ -2509,40 +2576,12 @@ class X86Translator(object):
         self._update_af(tb, src1_data, src2_data, tmp0)
         self._update_pf(tb, src1_data, src2_data, tmp0)
 
-        # Update destination pointer.
-        tb.add(self._builder.gen_bisz(self._flags["df"], df_zero))
-        tb.add(self._builder.gen_jcc(df_zero, forward_lbl))
-
-        # Update backwards.
-        tb.add(backward_lbl)
-        # src1
-        tb.add(self._builder.gen_sub(src1, imm_tmp, src1_tmp))
-        tb.add(self._builder.gen_str(src1_tmp, src1))
-        # src2
-        tb.add(self._builder.gen_sub(src2, imm_tmp, src2_tmp))
-        tb.add(self._builder.gen_str(src2_tmp, src2))
-
-        # Jump to next instruction.
-        tb.add(self._builder.gen_jcc(imm_one, continue_lbl))
-
-        # Update forwards.
-        tb.add(forward_lbl)
-        # src1
-        tb.add(self._builder.gen_add(src1, imm_tmp, src1_tmp))
-        tb.add(self._builder.gen_str(src1_tmp, src1))
-        # src2
-        tb.add(self._builder.gen_add(src2, imm_tmp, src2_tmp))
-        tb.add(self._builder.gen_str(src2_tmp, src2))
-
-        # Continuation label.
-        tb.add(continue_lbl)
+        # Update source pointers.
+        self._update_strings_srcs(tb, src1, src2, data_size)
         # -------------------------------------------------------------------- #
 
         if instruction.prefix:
-            self._rep_prefix_end(tb, end_addr, counter, loop_start_lbl, instruction.prefix)
-        else:
-            # Jump to instruction's end.
-            tb.add(self._builder.gen_jcc(imm_one, end_addr))
+            self._rep_prefix_end(tb, instruction, counter, loop_start_lbl)
 
     def _translate_stos(self, tb, instruction):
         self._translate_stosb(self, tb, instruction)
@@ -2569,9 +2608,6 @@ class X86Translator(object):
         #     ELSE (E)DI <- (E)DI - sizeof(SRC);
         # FI;
 
-        # Define instruction's end address.
-        end_addr = ReilImmediateOperand((instruction.address + instruction.size) << 8, 40)
-
         # Define source register.
         if suffix == 'b':
             src = ReilRegisterOperand("al", 8)
@@ -2592,21 +2628,8 @@ class X86Translator(object):
         else:
             raise Exception("Invalid architecture mode: %d", self._arch_mode)
 
-        # Create labels.
-        forward_lbl = Label('forward')
-        backward_lbl = Label('backward')
-        continue_lbl = Label('continue')
-
-        # Define immediate registers.
-        imm_one = tb.immediate(1, 1)
-
-        # Define temporary registers
-        df_zero = tb.temporal(1)
-        imm_tmp = tb.immediate(src.size/8, dst.size)
-        dst_tmp = tb.temporal(dst.size)
-
         if instruction.prefix:
-            counter, loop_start_lbl = self._rep_prefix_begin(tb, end_addr)
+            counter, loop_start_lbl = self._rep_prefix_begin(tb, instruction)
 
         # Instruction
         # -------------------------------------------------------------------- #
@@ -2614,36 +2637,14 @@ class X86Translator(object):
         tb.add(self._builder.gen_stm(src, dst))
 
         # Update destination pointer.
-        tb.add(self._builder.gen_bisz(self._flags["df"], df_zero))
-        tb.add(self._builder.gen_jcc(df_zero, forward_lbl))
-
-        # Update backwards.
-        tb.add(backward_lbl)
-        tb.add(self._builder.gen_sub(dst, imm_tmp, dst_tmp))
-        tb.add(self._builder.gen_str(dst_tmp, dst))
-
-        # Jump to next instruction.
-        tb.add(self._builder.gen_jcc(imm_one, continue_lbl))
-
-        # Update forwards.
-        tb.add(forward_lbl)
-        tb.add(self._builder.gen_add(dst, imm_tmp, dst_tmp))
-        tb.add(self._builder.gen_str(dst_tmp, dst))
-
-        # Continuation label.
-        tb.add(continue_lbl)
+        self._update_strings_dst(tb, dst, src.size)
         # -------------------------------------------------------------------- #
 
         if instruction.prefix:
-            self._rep_prefix_end(tb, end_addr, counter, loop_start_lbl, instruction.prefix)
-        else:
-            # Jump to instruction's end.
-            tb.add(self._builder.gen_jcc(imm_one, end_addr))
+            self._rep_prefix_end(tb, instruction, counter, loop_start_lbl)
 
-    def _rep_prefix_begin(self, tb, end_addr):
+    def _rep_prefix_begin(self, tb, instruction):
         # Define counter register.
-        loop_start_lbl = Label('loop_start')
-
         if self._arch_info.address_size == 16:
             counter = ReilRegisterOperand("cx", 16)
         elif self._arch_info.address_size == 32:
@@ -2653,6 +2654,13 @@ class X86Translator(object):
         else:
             raise Exception("Invalid address size: %d", self._arch_info.address_size)
 
+        # Create labels.
+        loop_start_lbl = Label('loop_start')
+
+        # Define immediate registers.
+        end_addr = ReilImmediateOperand((instruction.address + instruction.size) << 8, 40)
+
+        # Define temporary registers.
         counter_zero = tb.temporal(1)
 
         tb.add(loop_start_lbl)
@@ -2662,17 +2670,23 @@ class X86Translator(object):
 
         return counter, loop_start_lbl
 
-    def _rep_prefix_end(self, tb, end_addr, counter, loop_start_lbl, prefix):
+    def _rep_prefix_end(self, tb, instruction, counter, loop_start_lbl):
+        # Define immediate registers
+        imm_one = tb.immediate(1, 1)
         counter_imm_one = tb.immediate(1, counter.size)
+        end_addr = ReilImmediateOperand((instruction.address + instruction.size) << 8, 40)
+
+        # Define temporary registers.
         counter_tmp = tb.temporal(counter.size)
         counter_zero = tb.temporal(1)
         zf_zero = tb.temporal(1)
-        imm_one = tb.immediate(1, 1)
 
         tb.add(self._builder.gen_sub(counter, counter_imm_one, counter_tmp))
         tb.add(self._builder.gen_str(counter_tmp, counter))
         tb.add(self._builder.gen_bisz(counter, counter_zero))
         tb.add(self._builder.gen_jcc(counter_zero, end_addr))
+
+        prefix = instruction.prefix
 
         if prefix in ["rep"]:
             pass
