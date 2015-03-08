@@ -177,6 +177,9 @@ class BinaryFile(object):
                     if "/" in lib:
                         lib = os.path.realpath(lib)
                         self.libs[lib] = BinaryFile(lib, deps=False)
+        except Exception:
+            print "BFD could not open the file."
+
         try:
             pe = PE(filename)
 
