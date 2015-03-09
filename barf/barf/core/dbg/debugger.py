@@ -23,6 +23,9 @@ class ProcessControl(object):
     def start_process(self, binary, args, ea_start, ea_end, hooked_functions = []):
         self.binary = binary
 
+        self.arch = self.binary.architecture
+        self.arch_mode = self.binary.architecture_mode
+
         self.filename = binary.filename
         self.args = list(args)
 
@@ -109,7 +112,7 @@ class ProcessControl(object):
 
             if (ip) in self.hooked_functions:
                 name, module = self.hooked_functions[ip]
-                event = Call(name, module)
+                event = Call(name, module, (self.arch, self.arch_mode))
                 event.detect_parameters(self.process)
                 event.detect_return_address(self.process)
 
@@ -149,7 +152,7 @@ class ProcessControl(object):
         if ip in self.hooked_functions:
             print "ENTERING HOOK FUNCTION"
             name, module = self.hooked_functions[ip]
-            event = Call(name, module)
+            event = Call(name, module, (self.arch, self.arch_mode))
             event.detect_parameters(self.process)
             event.detect_return_address(self.process)
 
