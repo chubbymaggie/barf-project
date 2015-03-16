@@ -1,3 +1,5 @@
+CC = gcc
+
 .PHONY: all clean
 
 all: branch1 branch2 branch3 branch4 complex1 constraint1 constraint2 \
@@ -5,31 +7,31 @@ all: branch1 branch2 branch3 branch4 complex1 constraint1 constraint2 \
 	taint1 taint2
 
 branch1: branch1.c
-	gcc -m32 -o branch1 branch1.c
+	$(CC) -m32 -o branch1 branch1.c
 
 branch2: branch2.c
-	gcc -m32 -o branch2 branch2.c
+	$(CC) -m32 -o branch2 branch2.c
 
 branch3: branch3.c
-	gcc -m32 -o branch3 branch3.c
+	$(CC) -m32 -o branch3 branch3.c
 
 branch4: branch4.c
-	gcc -o branch4 branch4.c
+	$(CC) -o branch4 branch4.c
 
 complex1: complex1.c
-	gcc -ggdb -m32 -O0 -o complex1 complex1.c
+	$(CC) -ggdb -m32 -O0 -o complex1 complex1.c
 
 constraint1: constraint1.c
-	gcc -m32 -O0 -o constraint1 constraint1.c
+	$(CC) -m32 -O0 -o constraint1 constraint1.c
 
 constraint2: constraint2.c
-	gcc -m32 -O0 -o constraint2 constraint2.c
+	$(CC) -m32 -O0 -o constraint2 constraint2.c
 
 constraint3: constraint3.c
-	gcc -m32 -O0 -o constraint3 constraint3.c
+	$(CC) -m32 -O0 -o constraint3 constraint3.c
 
 helloworld1: helloworld1.c
-	gcc -m32 -o helloworld1 helloworld1.c
+	$(CC) -m32 -o helloworld1 helloworld1.c
 
 gadget1: gadget1.asm
 	nasm -felf32 gadget1.asm -o gadget1.o
@@ -42,10 +44,10 @@ gadget2: gadget2.asm
 	rm gadget2.o
 
 serial1: serial1.c
-	gcc -m32 -o serial1 serial1.c
+	$(CC) -m32 -o serial1 serial1.c
 
 stack1: stack1.c
-	gcc -Wformat=0 -Wno-deprecated-declarations -m32 -o stack1 stack1.c
+	$(CC) -Wformat=0 -Wno-deprecated-declarations -m32 -o stack1 stack1.c
 
 loop1: loop1.asm
 	nasm -felf32 loop1.asm -o loop1.o
@@ -53,7 +55,7 @@ loop1: loop1.asm
 	rm loop1.o
 
 loop2: loop2.c
-	gcc -m32 -o loop2 loop2.c
+	$(CC) -m32 -o loop2 loop2.c
 
 taint1: taint1.asm
 	nasm -felf32 taint1.asm -o taint1.o

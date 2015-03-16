@@ -1,14 +1,37 @@
+# Copyright (c) 2014, Fundacion Dr. Manuel Sadosky
+# All rights reserved.
+
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+
+# 1. Redistributions of source code must retain the above copyright notice, this
+# list of conditions and the following disclaimer.
+
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+# this list of conditions and the following disclaimer in the documentation
+# and/or other materials provided with the distribution.
+
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
 import unittest
 
 from barf.arch import ARCH_X86_MODE_32
 from barf.arch.x86.x86base import X86ArchitectureInformation
 from barf.arch.x86.x86parser import X86Parser
 from barf.arch.x86.x86translator import X86Translator
-from barf.core.reil import ReilEmptyOperand
 from barf.core.reil import ReilEmulator
 from barf.core.reil import ReilMemory
 from barf.core.reil import ReilParser
-from barf.utils.utils import VariableNamer
+
 
 class ReilMemoryTests(unittest.TestCase):
 
@@ -91,7 +114,7 @@ class ReilEmulatorTests(unittest.TestCase):
 
         self._emulator.set_arch_registers(self._arch_info.registers_gp_all)
         self._emulator.set_arch_registers_size(self._arch_info.registers_size)
-        self._emulator.set_reg_access_mapper(self._arch_info.registers_access_mapper())
+        self._emulator.set_reg_access_mapper(self._arch_info.alias_mapper)
 
         self._asm_parser = X86Parser()
         self._translator = X86Translator()

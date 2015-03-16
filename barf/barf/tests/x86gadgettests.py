@@ -1,3 +1,27 @@
+# Copyright (c) 2014, Fundacion Dr. Manuel Sadosky
+# All rights reserved.
+
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+
+# 1. Redistributions of source code must retain the above copyright notice, this
+# list of conditions and the following disclaimer.
+
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+# this list of conditions and the following disclaimer in the documentation
+# and/or other materials provided with the distribution.
+
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
 import unittest
 
 from barf.analysis.codeanalyzer import CodeAnalyzer
@@ -17,6 +41,7 @@ from barf.core.reil import ReilRegisterOperand
 from barf.core.smt.smtlibv2 import Z3Solver as SmtSolver
 from barf.core.smt.smttranslator import SmtTranslator
 
+
 class GadgetClassifierTests(unittest.TestCase):
 
     def setUp(self):
@@ -26,7 +51,7 @@ class GadgetClassifierTests(unittest.TestCase):
 
         self._ir_emulator.set_arch_registers(self._arch_info.registers_gp_all)
         self._ir_emulator.set_arch_registers_size(self._arch_info.registers_size)
-        self._ir_emulator.set_reg_access_mapper(self._arch_info.registers_access_mapper())
+        self._ir_emulator.set_reg_access_mapper(self._arch_info.alias_mapper)
 
         self._g_classifier = GadgetClassifier(self._ir_emulator, self._arch_info)
 
@@ -929,16 +954,16 @@ class GadgetClassifierTests(unittest.TestCase):
     def print_candidates(self, candidates):
         print "Candidates :"
 
-        for g in candidates:
-            print g
+        for gadget in candidates:
+            print gadget
             print "-" * 10
 
     def print_classified(self, classified):
         print "Classified :"
 
-        for g in classified:
-            print g
-            print g.type
+        for gadget in classified:
+            print gadget
+            print gadget.type
             print "-" * 10
 
 
@@ -952,9 +977,9 @@ class GadgetVerifierTests(unittest.TestCase):
 
         self._ir_emulator.set_arch_registers(self._arch_info.registers_gp_all)
         self._ir_emulator.set_arch_registers_size(self._arch_info.registers_size)
-        self._ir_emulator.set_reg_access_mapper(self._arch_info.registers_access_mapper())
+        self._ir_emulator.set_reg_access_mapper(self._arch_info.alias_mapper)
 
-        self._smt_translator.set_reg_access_mapper(self._arch_info.registers_access_mapper())
+        self._smt_translator.set_reg_access_mapper(self._arch_info.alias_mapper)
         self._smt_translator.set_arch_registers_size(self._arch_info.registers_size)
 
         self._code_analyzer = CodeAnalyzer(self._smt_solver, self._smt_translator)
@@ -1104,36 +1129,7 @@ class GadgetVerifierTests(unittest.TestCase):
         self.assertTrue(ReilRegisterOperand("ebx", 32) in g_classified[1].modified_registers)
         self.assertTrue(ReilRegisterOperand("esp", 32) in g_classified[1].modified_registers)
 
-    def test_store_memory_two_accesses_1(self):
-        # testing : m[dst_reg + offset] <- dst_reg
-        binary  = "\x50"                      # 0x00 : (1) push eax
-        binary += "\x53"                      # 0x01 : (1) push ebx
-        binary += "\xc3"                      # 0x02 : (1) ret
-
-        g_finder = GadgetFinder(X86Disassembler(), binary, X86Translator(translation_mode=LITE_TRANSLATION))
-
-        g_candidates = g_finder.find(0x00000000, 0x00000002)
-        g_classified = self._g_classifier.classify(g_candidates[0])
-
-        # self.print_candidates(g_candidates)
-        # self.print_classified(g_classified)
-
-        verified = self._g_verifier.verify(g_classified[1])
-
-        self.assertEquals(len(g_candidates), 1)
-        self.assertEquals(len(g_classified), 2)
-
-        self.assertTrue(verified)
-
-        self.assertEquals(g_classified[1].type, GadgetType.StoreMemory)
-        self.assertEquals(g_classified[1].sources, [ReilRegisterOperand("eax", 32)])
-        self.assertEquals(g_classified[1].destination, [ReilRegisterOperand("esp", 32), ReilImmediateOperand(0xfffffffc, 32)])
-
-        self.assertEquals(len(g_classified[1].modified_registers), 1)
-
-        self.assertTrue(ReilRegisterOperand("esp", 32) in g_classified[1].modified_registers)
-
-    def test_load_memory_two_accesses_1(self):
+    def test_load_memory_two_accesses_2(self):
         # testing : dst_reg <- m[dst_reg + offset]
         binary  = "\x8b\x09"                  # 0x00 : (2) mov ecx, dword ptr [ecx]
         binary += "\x03\x03"                  # 0x02 : (2) add eax, dword ptr [ebx]
@@ -1162,6 +1158,35 @@ class GadgetVerifierTests(unittest.TestCase):
 
         self.assertTrue(ReilRegisterOperand("eax", 32) in g_classified[0].modified_registers)
         self.assertTrue(ReilRegisterOperand("esp", 32) in g_classified[0].modified_registers)
+
+    def test_store_memory_two_accesses_1(self):
+        # testing : m[dst_reg + offset] <- dst_reg
+        binary  = "\x50"                      # 0x00 : (1) push eax
+        binary += "\x53"                      # 0x01 : (1) push ebx
+        binary += "\xc3"                      # 0x02 : (1) ret
+
+        g_finder = GadgetFinder(X86Disassembler(), binary, X86Translator(translation_mode=LITE_TRANSLATION))
+
+        g_candidates = g_finder.find(0x00000000, 0x00000002)
+        g_classified = self._g_classifier.classify(g_candidates[0])
+
+        # self.print_candidates(g_candidates)
+        # self.print_classified(g_classified)
+
+        verified = self._g_verifier.verify(g_classified[1])
+
+        self.assertEquals(len(g_candidates), 1)
+        self.assertEquals(len(g_classified), 2)
+
+        self.assertTrue(verified)
+
+        self.assertEquals(g_classified[1].type, GadgetType.StoreMemory)
+        self.assertEquals(g_classified[1].sources, [ReilRegisterOperand("eax", 32)])
+        self.assertEquals(g_classified[1].destination, [ReilRegisterOperand("esp", 32), ReilImmediateOperand(0xfffffffc, 32)])
+
+        self.assertEquals(len(g_classified[1].modified_registers), 1)
+
+        self.assertTrue(ReilRegisterOperand("esp", 32) in g_classified[1].modified_registers)
 
     def test_arithmetic_load_memory_two_accesses_1(self):
         # testing : dst_reg <- dst_reg + m[dst_reg + offset]
@@ -1466,16 +1491,16 @@ class GadgetVerifierTests(unittest.TestCase):
     def print_candidates(self, candidates):
         print "Candidates :"
 
-        for g in candidates:
-            print g
+        for gadget in candidates:
+            print gadget
             print "-" * 10
 
     def print_classified(self, classified):
         print "Classified :"
 
-        for g in classified:
-            print g
-            print g.type
+        for gadget in classified:
+            print gadget
+            print gadget.type
             print "-" * 10
 
 

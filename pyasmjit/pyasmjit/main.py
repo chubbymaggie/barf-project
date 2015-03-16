@@ -1,10 +1,34 @@
+# Copyright (c) 2014, Fundacion Dr. Manuel Sadosky
+# All rights reserved.
+
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+
+# 1. Redistributions of source code must retain the above copyright notice, this
+# list of conditions and the following disclaimer.
+
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+# this list of conditions and the following disclaimer in the documentation
+# and/or other materials provided with the distribution.
+
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
 import os
 import subprocess
 import tempfile
 
 import pyasmjit
 
-template_assembly = """\
+x86_template_assembly = """\
 ;; Make sure to compile in 64 bits
 BITS 64
 
@@ -130,13 +154,52 @@ pop rbp
 ret
 """
 
-def execute(assembly, context):
+arm_template_assembly = """\
+/* Save registers */
+push {{r0 - r12, lr}}
+
+/* Save flags (user mode) */
+mrs r1, apsr
+push {{r1}}
+
+/* Save context pointer (redundant, it was saved before, but done for code clarity) */
+push {{r0}}
+
+/* Load context */
+ldr r1, [r0, #(16 * 4)]
+msr apsr_nzcvq, r1
+ldm r0, {{r0 - r12}}
+
+/* Run code */
+{code}
+
+/* TODO: lr is used as scratch register when saving the context so its value is not saved correctly */
+/* Restore context pointer */
+pop {{lr}}
+
+/* Save context */
+stm lr, {{r0 - r12}}
+mrs r1, apsr
+str r1, [lr, #(16 * 4)]
+
+/* Restore flags */
+pop {{r1}}
+msr apsr_nzcvq, r1
+
+/* Restore registers */
+pop {{r0 - r12, lr}}
+
+/* Return */
+blx lr
+"""
+
+def x86_execute(assembly, context):
     # Initialize return values
     rc  = 0
     ctx = {}
 
     # Instantiate assembly template.
-    assembly = template_assembly.format(code=assembly)
+    assembly = x86_template_assembly.format(code=assembly)
 
     # Create temporary files for compilation.
     f_asm = tempfile.NamedTemporaryFile(delete=False)
@@ -147,7 +210,8 @@ def execute(assembly, context):
     f_asm.close()
 
     # Run nasm.
-    cmd = "nasm -f bin -o {0} {1}".format(f_obj.name, f_asm.name)
+    cmd_fmt = "nasm -f bin -o {0} {1}"
+    cmd = cmd_fmt.format(f_obj.name, f_asm.name)
     return_code = subprocess.call(cmd, shell=True)
 
     # Check for assembler errors.
@@ -161,7 +225,7 @@ def execute(assembly, context):
         f_obj.close()
 
         # Run binary code.
-        rc, ctx = pyasmjit.jit(binary, context)
+        rc, ctx = pyasmjit.x86_jit(binary, context)
     else:
         rc = return_code
 
@@ -170,3 +234,53 @@ def execute(assembly, context):
     os.remove(f_obj.name)
 
     return rc, ctx
+
+def arm_execute(assembly, context):
+    # Initialize return values
+    rc  = 0
+    ctx = {}
+
+    # Instantiate assembly template.
+    assembly = arm_template_assembly.format(code=assembly)
+
+    # Create temporary files for compilation.
+    f_asm = tempfile.NamedTemporaryFile(delete=False)
+    f_obj = tempfile.NamedTemporaryFile(delete=False)
+    f_bin = tempfile.NamedTemporaryFile(delete=False)
+
+    # Write assembly to a file.
+    f_asm.write(assembly)
+    f_asm.close()
+
+    # Run nasm.
+    cmd_fmt = "gcc -c -x assembler {asm} -o {obj}; objcopy -O binary {obj} {bin};"
+    cmd = cmd_fmt.format(asm=f_asm.name, obj=f_obj.name, bin=f_bin.name)
+    return_code = subprocess.call(cmd, shell=True)
+
+    # Check for assembler errors.
+    if return_code == 0:
+        # Read binary code.
+        binary = ""
+        byte = f_bin.read(1)
+        while byte:
+            binary += byte
+            byte = f_bin.read(1)
+        f_bin.close()
+
+        # Run binary code.
+        rc, ctx, mem = pyasmjit.arm_jit(binary, context)
+    else:
+        rc = return_code
+
+    # Remove temporary files.
+    os.remove(f_asm.name)
+    os.remove(f_obj.name)
+    os.remove(f_bin.name)
+
+    return rc, ctx, mem
+
+def arm_alloc(size):
+    return pyasmjit.arm_alloc(size)
+
+def arm_free():
+    return pyasmjit.arm_free()

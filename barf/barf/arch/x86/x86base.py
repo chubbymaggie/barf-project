@@ -1,3 +1,27 @@
+# Copyright (c) 2014, Fundacion Dr. Manuel Sadosky
+# All rights reserved.
+
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+
+# 1. Redistributions of source code must retain the above copyright notice, this
+# list of conditions and the following disclaimer.
+
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+# this list of conditions and the following disclaimer in the documentation
+# and/or other materials provided with the distribution.
+
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
 """
 This module contains all lthe classes that handle the x86 instruction
 representation.
@@ -208,7 +232,11 @@ class X86ArchitectureInformation(ArchitectureInformation):
 
         self._registers_size = {}
 
+        self._alias_mapper = {}
+
         self._load_registers()
+
+        self._load_alias_mapper()
 
     @property
     def architecture_mode(self):
@@ -271,9 +299,15 @@ class X86ArchitectureInformation(ArchitectureInformation):
         """
         return self._registers_size
 
-    def registers_access_mapper(self):
+    @property
+    def alias_mapper(self):
+        """Return registers alias mapper.
+        """
+        return self._alias_mapper
+
+    def _load_alias_mapper(self):
         if self._arch_mode == ARCH_X86_MODE_32:
-            reg_mapper = {
+            alias_mapper = {
                 "al" : ("eax", 0), "ah" : ("eax", 8), "ax" : ("eax", 0),
                 "bl" : ("ebx", 0), "bh" : ("ebx", 8), "bx" : ("ebx", 0),
                 "cl" : ("ecx", 0), "ch" : ("ecx", 8), "cx" : ("ecx", 0),
@@ -286,7 +320,7 @@ class X86ArchitectureInformation(ArchitectureInformation):
 
             flags_reg = "eflags"
         else:
-            reg_mapper = {
+            alias_mapper = {
                 "al"   : ("rax", 0), "ah"   : ("rax", 8), "ax"   : ("rax", 0),
                 "bl"   : ("rbx", 0), "bh"   : ("rbx", 8), "bx"   : ("rbx", 0),
                 "cl"   : ("rcx", 0), "ch"   : ("rcx", 8), "cx"   : ("rcx", 0),
@@ -326,9 +360,9 @@ class X86ArchitectureInformation(ArchitectureInformation):
             "of": (flags_reg, 11),
         }
 
-        reg_mapper.update(flags_mapper)
+        alias_mapper.update(flags_mapper)
 
-        return reg_mapper
+        self._alias_mapper = alias_mapper
 
     def _load_registers(self):
         registers_all = self.regs_seg + \
