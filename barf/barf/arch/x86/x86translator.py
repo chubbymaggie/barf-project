@@ -2697,6 +2697,7 @@ class X86Translator(object):
         else:
             raise Exception("Invalid prefix: %s" % prefix)
 
+        tb.add(self._builder.gen_jcc(zf_zero, end_addr))
         tb.add(self._builder.gen_jcc(imm_one, loop_start_lbl))
 
 # "I/O Instructions"
