@@ -26,15 +26,19 @@
 Binary Interface Module.
 """
 
-import subprocess
-import re
+import logging
 import os
+import re
+import subprocess
 
 from pefile import PE
 from pybfd.bfd import Bfd
 
 import misc as misc
 import barf.arch as arch
+
+logger = logging.getLogger(__name__)
+
 
 class Memory(object):
 
@@ -105,7 +109,6 @@ class BinaryFile(object):
         if filename:
             self._open(filename)
 
-
     @property
     def start_address(self):
         """Get start address of section .text.
@@ -158,21 +161,8 @@ class BinaryFile(object):
 
 
     def _open(self, filename):
-        # # open file
-        # bfd = Bfd(filename)
-
-        # # get text section
-        # stext = bfd.sections.get(".text")
-
-        # self._section_text = stext.content
-        # self._section_text_start = stext.vma
-        # self._section_text_end = stext.vma + stext.size - 1
-        # self._section_text_memory = Memory(self._text_section_reader, self._text_section_writer)
-
-        # # get arch and arch mode
-        # self._arch = self._map_architecture(bfd.architecture_name)
-        # self._arch_mode = self._map_architecture_mode(bfd.arch_size)
-
+        # FIXME: Ugly hack to support PE files. Remove when pybfd
+        # support PEs.
         try:
 
             bfd = Bfd(filename)
@@ -191,8 +181,17 @@ class BinaryFile(object):
             self._section_text_memory = Memory(self._text_section_reader, self._text_section_writer)
 
             # get arch and arch mode
-            self._arch = self._map_architecture(bfd.architecture_name)
-            self._arch_mode = self._map_architecture_mode(bfd.arch_size)
+            arch_name = bfd.architecture_name
+            arch_size = bfd.arch_size
+
+            # FIXME: Ugly hack. If no architecture name is return,
+            # assume it ARM. Remove when pybfd gets fixed.
+            if not arch_name:
+                arch_name = "ARM"
+
+            self._arch = self._map_architecture(arch_name)
+            self._arch_mode = self._map_architecture_mode(arch_name, arch_size)
+
             self.libs = dict()
 
             if self._deps:
@@ -201,8 +200,10 @@ class BinaryFile(object):
                     if "/" in lib:
                         lib = os.path.realpath(lib)
                         self.libs[lib] = BinaryFile(lib, deps=False)
-        except Exception:
-            print "BFD could not open the file."
+        except:
+            logger.error("BFD could not open the file.", exc_info=True)
+
+            pass
 
         try:
             pe = PE(filename)
@@ -233,12 +234,12 @@ class BinaryFile(object):
                 else:
                     raise Exception("Machine not supported.")
         except:
-            # print "PEFile could not open the file."
+            logger.error("PEFile could not open the file.", exc_info=True)
+
             pass
 
         if not self._section_text:
             raise Exception("Could not open the file.")
-
 
     def _populate_libraries_ldd(self):
         """
@@ -279,20 +280,27 @@ class BinaryFile(object):
         self.plt = plt
         self.got = got
 
-    def _map_architecture(self, bfd_arch):
+    def _map_architecture(self, bfd_arch_name):
         arch_map = {
             "Intel 386" : arch.ARCH_X86,
+            "ARM"       : arch.ARCH_ARM,
         }
 
-        return arch_map[bfd_arch]
+        return arch_map[bfd_arch_name]
 
-    def _map_architecture_mode(self, bfd_arch_mode):
+    def _map_architecture_mode(self, bfd_arch_name, bfd_arch_size):
         arch_mode_map = {
-            32 : arch.ARCH_X86_MODE_32,
-            64 : arch.ARCH_X86_MODE_64
+            "Intel 386" : {
+                32 : arch.ARCH_X86_MODE_32,
+                64 : arch.ARCH_X86_MODE_64
+            },
+            "ARM" : {
+                32 : arch.ARCH_ARM_MODE_32,
+                64 : arch.ARCH_ARM_MODE_64
+            },
         }
 
-        return arch_mode_map[bfd_arch_mode]
+        return arch_mode_map[bfd_arch_name][bfd_arch_size]
 
     def _text_section_reader(self, address, size):
         start = address - self._section_text_start
