@@ -1992,6 +1992,16 @@ class X86Translator(object):
 
         tb.add(self._builder.gen_jcc(self._flags["zf"], addr_oprnd))
 
+    def _translate_jp(self, tb, instruction):
+        # Jump near if equal (PF=1).
+
+        oprnd0 = tb.read(instruction.operands[0])
+
+        addr_oprnd = self._translate_address(tb, oprnd0)
+
+        tb.add(self._builder.gen_jcc(self._flags["pf"], addr_oprnd))
+
+
     def _translate_js(self, tb, instruction):
         # Jump near if sign (SF=1).
 
