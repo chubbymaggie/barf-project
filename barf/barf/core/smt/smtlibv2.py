@@ -564,7 +564,9 @@ class Z3Solver(object):
         self._declarations = {} #weakref.WeakValueDictionary()
         self._constraints = set()
         self.input_symbols = list()
-        self._proc = Popen('z3 -T:120 -smt2 -in', shell=True, stdin=PIPE, stdout=PIPE)        #'stp --SMTLIB2'
+        #assert(0)
+        self._z3_path = '~/.local/bin/z3'
+        self._proc = Popen(self._z3_path + ' -T:120 -smt2 -in', shell=True, stdin=PIPE, stdout=PIPE)        #'stp --SMTLIB2'
         # self._proc = Popen('z3 -t:120 -smt2 -in', shell=True, stdin=PIPE, stdout=PIPE)        #'stp --SMTLIB2'
         #self._proc = Popen('stp --SMTLIB2', shell=True, stdin=PIPE, stdout=PIPE)        #'stp --SMTLIB2'
 
@@ -589,7 +591,7 @@ class Z3Solver(object):
         self._constraints = state['constraints']
         self._stack = state['stack']
         self.input_symbols = state['input_symbols']
-        self._proc = Popen('z3 -smt2 -in', shell=True, stdin=PIPE, stdout=PIPE)        #'stp --SMTLIB2'
+        self._proc = Popen(self._z3_path + ' -smt2 -in', shell=True, stdin=PIPE, stdout=PIPE)        #'stp --SMTLIB2'
         #self._proc = Popen('stp --SMTLIB2', shell=True, stdin=PIPE, stdout=PIPE)        #'stp --SMTLIB2'
 
     def reset(self, full=False):
@@ -607,7 +609,7 @@ class Z3Solver(object):
             self._declarations = {}
             self._constraints = set()
             self.input_symbols = list()
-            self._proc = Popen('z3 -t:120 -smt2 -in', shell=True, stdin=PIPE, stdout=PIPE)        #'stp --SMTLIB2'
+            self._proc = Popen(self._z3_path + ' -t:120 -smt2 -in', shell=True, stdin=PIPE, stdout=PIPE)        #'stp --SMTLIB2'
             #self._proc = Popen('stp --SMTLIB2', shell=True, stdin=PIPE, stdout=PIPE)        #'stp --SMTLIB2'
 
             #fix for z3 declaration scopes
