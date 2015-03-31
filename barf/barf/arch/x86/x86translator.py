@@ -290,7 +290,9 @@ class X86Translator(object):
         try:
             trans_instrs = self._translate(instruction)
         except NotImplementedError:
-            trans_instrs = [self._builder.gen_unkn()]
+            unkn_instr = self._builder.gen_unkn()
+            unkn_instr.address = instruction.address << 8 | (0x0 & 0xff)
+            trans_instrs = [unkn_instr]
 
             self._log_not_supported_instruction(instruction)
         except:
@@ -614,6 +616,60 @@ class X86Translator(object):
         tb.add(self._builder.gen_ldm(self._sp, oprnd0))
         tb.add(self._builder.gen_add(self._sp, self._ws, tmp0))
         tb.add(self._builder.gen_str(tmp0, self._sp))
+
+    def _translate_cmpxchg(self, tb, instruction):
+        # Flags Affected
+        # The ZF flag is set if the values in the destination operand
+        # and register AL, AX, or EAX are equal; otherwise it is
+        # cleared. The CF, PF, AF, SF, and OF flags are set according
+        # to the results of the comparison operation.
+
+        # Accumulator = AL, AX, EAX, or RAX depending on whether a byte,
+        # word, doubleword, or quadword comparison is being performed
+        # IF accumulator = DEST
+        # THEN
+        #   ZF <- 1;
+        #   DEST <- SRC;
+        # ELSE
+        #   ZF <- 0;
+        #   accumulator <- DEST;
+        # FI;
+
+        oprnd0 = tb.read(instruction.operands[0])
+        oprnd1 = tb.read(instruction.operands[1])
+
+        # Define immediate registers
+        end_addr = ReilImmediateOperand((instruction.address + instruction.size) << 8, self._arch_info.address_size + 8)
+
+        # Define accum register.
+        if oprnd0.size == 8:
+            accum = ReilRegisterOperand("al", 8)
+        elif oprnd0.size == 16:
+            accum = ReilRegisterOperand("ax", 16)
+        elif oprnd0.size == 32:
+            accum = ReilRegisterOperand("eax", 32)
+        elif oprnd0.size == 64:
+            accum = ReilRegisterOperand("rax", 64)
+        else:
+            raise Exception("Invalid operand size: %s" % oprnd0)
+
+        tmp0 = tb.temporal(oprnd0.size*2)
+
+        # Compare.
+        tb.add(self._builder.gen_sub(oprnd0, accum, tmp0))
+
+        # Exchange
+        tb.add(self._builder.gen_jcc(tmp0, end_addr))   # jmp to end if not zero
+
+        tb.write(instruction.operands[0], oprnd1)
+
+        # Flags : CF, OF, SF, ZF, AF, PF
+        self._update_cf(tb, oprnd0, oprnd1, tmp0)
+        self._update_of_sub(tb, oprnd0, oprnd1, tmp0)
+        self._update_sf(tb, oprnd0, oprnd1, tmp0)
+        self._update_zf(tb, oprnd0, oprnd1, tmp0)
+        self._update_af(tb, oprnd0, oprnd1, tmp0)
+        self._update_pf(tb, oprnd0, oprnd1, tmp0)
 
 # "Binary Arithmetic Instructions"
 # ============================================================================ #
@@ -1794,6 +1850,40 @@ class X86Translator(object):
 
 # "Bit and Byte Instructions"
 # ============================================================================ #
+    def _translate_bt(self, tb, instruction):
+        # Flags Affected
+        # The CF flag contains the value of the selected bit. The ZF
+        # flag is unaffected. The OF, SF, AF, and PF flags are
+        # undefined.
+
+        oprnd0 = tb.read(instruction.operands[0])
+        oprnd1 = tb.read(instruction.operands[1])
+
+        tmp0 = tb.temporal(oprnd0.size)
+        zero = tb.immediate(0, oprnd0.size)
+        one = tb.immediate(1, oprnd0.size)
+        bit_base_size = tb.immediate(oprnd0.size, oprnd1.size)
+        bit_offset_tmp = tb.temporal(oprnd0.size)
+        bit_offset = tb.temporal(oprnd0.size)
+
+        # Compute bit offset.
+        tb.add(self._builder.gen_mod(oprnd1, bit_base_size, bit_offset_tmp))
+        tb.add(self._builder.gen_sub(zero, bit_offset_tmp, bit_offset)) # negate
+
+        # Extract bit.
+        tb.add(self._builder.gen_bsh(oprnd0, bit_offset, tmp0))
+
+        # Set CF.
+        tb.add(self._builder.gen_and(tmp0, one, self._flags["cf"]))
+
+        # Set flags.
+        if self._translation_mode == FULL_TRANSLATION:
+            # Flags : OF, SF, AF, PF
+            self._undefine_flag(tb, self._flags["of"])
+            self._undefine_flag(tb, self._flags["sf"])
+            self._undefine_flag(tb, self._flags["af"])
+            self._undefine_flag(tb, self._flags["pf"])
+
     def _translate_test(self, tb, instruction):
         # Flags Affected
         # The OF and CF flags are set to 0. The SF, ZF, and PF flags are
