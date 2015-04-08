@@ -239,6 +239,14 @@ def check_operands_size(instr, arch_size):
 
         pass
 
+    elif instr.mnemonic in [ReilMnemonic.SEXT]:
+        # operand0 : Value to store (Literal or register)
+        # operand1 : Empty register
+        # operand2 : Destination register
+
+        assert instr.operands[0].size <= instr.operands[2].size, \
+            "Invalid operands size: %s" % instr
+
 class X86Translator(object):
 
     """x86 to IR Translator."""
@@ -644,6 +652,18 @@ class X86Translator(object):
 
         tb.write(instruction.operands[0], oprnd1)
 
+    def _translate_movsx(self, tb, instruction):
+        # Flags Affected
+        # None.
+
+        oprnd1 = tb.read(instruction.operands[1])
+
+        tmp0 = tb.temporal(instruction.operands[0].size)
+
+        tb.add(self._builder.gen_sext(oprnd1, tmp0))
+
+        tb.write(instruction.operands[0], tmp0)
+
     def _translate_movzx(self, tb, instruction):
         # Flags Affected
         # None.
@@ -657,38 +677,8 @@ class X86Translator(object):
         # Flags Affected
         # None.
 
-        eval_cond_fn = {
-            'a' : self._evaluate_a,
-            'ae' : self._evaluate_ae,
-            'b' : self._evaluate_b,
-            'be' : self._evaluate_be,
-            'c' : self._evaluate_c,
-            'e' : self._evaluate_e,
-            'g' : self._evaluate_g,
-            'ge' : self._evaluate_ge,
-            'l' : self._evaluate_l,
-            'le' : self._evaluate_le,
-            'na' : self._evaluate_na,
-            'nae' : self._evaluate_nae,
-            'nb' : self._evaluate_nb,
-            'nbe' : self._evaluate_nbe,
-            'nc' : self._evaluate_nc,
-            'ne' : self._evaluate_ne,
-            'ng' : self._evaluate_ng,
-            'nge' : self._evaluate_nge,
-            'nl' : self._evaluate_nl,
-            'nle' : self._evaluate_nle,
-            'no' : self._evaluate_no,
-            'np' : self._evaluate_np,
-            'ns' : self._evaluate_ns,
-            'nz' : self._evaluate_nz,
-            'o' : self._evaluate_o,
-            'p' : self._evaluate_p,
-            'pe' : self._evaluate_pe,
-            'po' : self._evaluate_po,
-            's' : self._evaluate_s,
-            'z' : self._evaluate_z,
-        }
+        eval_cond_fn_name = "_evaluate_" + cmov_cond
+        eval_cond_fn = getattr(self, eval_cond_fn_name, self._not_implemented)
 
         # NOTE: CMOV pseudocode (not its description) specifies that in 32 bit registers, even
         # if the condition is not met, the high 32 bits of the destiny are set to zero (DEST[63:32] <- 0).
@@ -700,17 +690,17 @@ class X86Translator(object):
         tb.add(self._builder.gen_str(oprnd0, tmp))
         tb.write(instruction.operands[0], tmp)
 
-        cond_not_met = Label('cond_not_met')
+        cmov_cond_not_met = Label('cmov_cond_not_met')
 
-        neg_cond = tb._negate_reg(eval_cond_fn[cmov_cond](tb))
+        neg_cond = tb._negate_reg(eval_cond_fn(tb))
 
-        tb.add(self._builder.gen_jcc(neg_cond, cond_not_met))
+        tb.add(self._builder.gen_jcc(neg_cond, cmov_cond_not_met))
 
         oprnd1 = tb.read(instruction.operands[1])
 
         tb.write(instruction.operands[0], oprnd1)
 
-        tb.add(cond_not_met)
+        tb.add(cmov_cond_not_met)
         tb.add(self._builder.gen_nop())
 
     def _translate_cmova(self, tb, instruction):
@@ -773,6 +763,88 @@ class X86Translator(object):
         self._translate_cmov(tb, instruction, 's')
     def _translate_cmovz(self, tb, instruction):
         self._translate_cmov(tb, instruction, 'z')
+
+    def _translate_set(self, tb, instruction, set_cond):
+        # Set if condition (set_cond) is met.
+        # Flags Affected
+        # None.
+
+        eval_cond_fn_name = "_evaluate_" + set_cond
+        eval_cond_fn = getattr(self, eval_cond_fn_name, self._not_implemented)
+
+        tb.write(instruction.operands[0], tb.immediate(0, 1))
+
+        set_cond_not_met = Label('set_cond_not_met')
+
+        neg_cond = tb._negate_reg(eval_cond_fn(tb))
+
+        tb.add(self._builder.gen_jcc(neg_cond, set_cond_not_met))
+
+        tb.write(instruction.operands[0], tb.immediate(1, 1))
+
+        tb.add(set_cond_not_met)
+        tb.add(self._builder.gen_nop())
+
+    def _translate_seta(self, tb, instruction):
+        self._translate_set(tb, instruction, 'a')
+    def _translate_setae(self, tb, instruction):
+        self._translate_set(tb, instruction, 'ae')
+    def _translate_setb(self, tb, instruction):
+        self._translate_set(tb, instruction, 'b')
+    def _translate_setbe(self, tb, instruction):
+        self._translate_set(tb, instruction, 'be')
+    def _translate_setc(self, tb, instruction):
+        self._translate_set(tb, instruction, 'c')
+    def _translate_sete(self, tb, instruction):
+        self._translate_set(tb, instruction, 'e')
+    def _translate_setg(self, tb, instruction):
+        self._translate_set(tb, instruction, 'g')
+    def _translate_setge(self, tb, instruction):
+        self._translate_set(tb, instruction, 'ge')
+    def _translate_setl(self, tb, instruction):
+        self._translate_set(tb, instruction, 'l')
+    def _translate_setle(self, tb, instruction):
+        self._translate_set(tb, instruction, 'le')
+    def _translate_setna(self, tb, instruction):
+        self._translate_set(tb, instruction, 'na')
+    def _translate_setnae(self, tb, instruction):
+        self._translate_set(tb, instruction, 'nae')
+    def _translate_setnb(self, tb, instruction):
+        self._translate_set(tb, instruction, 'nb')
+    def _translate_setnbe(self, tb, instruction):
+        self._translate_set(tb, instruction, 'nbe')
+    def _translate_setnc(self, tb, instruction):
+        self._translate_set(tb, instruction, 'nc')
+    def _translate_setne(self, tb, instruction):
+        self._translate_set(tb, instruction, 'ne')
+    def _translate_setng(self, tb, instruction):
+        self._translate_set(tb, instruction, 'ng')
+    def _translate_setnge(self, tb, instruction):
+        self._translate_set(tb, instruction, 'nge')
+    def _translate_setnl(self, tb, instruction):
+        self._translate_set(tb, instruction, 'nl')
+    def _translate_setnle(self, tb, instruction):
+        self._translate_set(tb, instruction, 'nle')
+    def _translate_setno(self, tb, instruction):
+        self._translate_set(tb, instruction, 'no')
+    def _translate_setnp(self, tb, instruction):
+        self._translate_set(tb, instruction, 'np')
+    def _translate_setns(self, tb, instruction):
+        self._translate_set(tb, instruction, 'ns')
+    def _translate_setnz(self, tb, instruction):
+        self._translate_set(tb, instruction, 'nz')
+    def _translate_seto(self, tb, instruction):
+        self._translate_set(tb, instruction, 'o')
+    def _translate_setp(self, tb, instruction):
+        self._translate_set(tb, instruction, 'p')
+    def _translate_setpe(self, tb, instruction):
+        self._translate_set(tb, instruction, 'pe')
+    def _translate_setpo(self, tb, instruction):
+        self._translate_set(tb, instruction, 'po')
+    def _translate_sets(self, tb, instruction):
+        self._translate_set(tb, instruction, 's')
+    def _translate_setz(self, tb, instruction):
+        self._translate_set(tb, instruction, 'z')
 
     def _translate_xchg(self, tb, instruction):
         # Flags Affected
@@ -2119,83 +2191,6 @@ class X86Translator(object):
         # Flags : AF
         self._undefine_flag(tb, self._flags["af"])
 
-    def _translate_seta(self, tb, instruction):
-        # Set byte if above (CF=0 and ZF=0)
-
-        imm0 = tb.immediate(1, 1)
-
-        tmp0 = tb.temporal(1)
-        tmp1 = tb.temporal(1)
-        tmp2 = tb.temporal(instruction.operands[0].size)
-
-        tb.add(self._builder.gen_xor(self._flags["cf"], imm0, tmp0))
-        tb.add(self._builder.gen_xor(self._flags["zf"], imm0, tmp1))
-        tb.add(self._builder.gen_and(tmp0, tmp1, tmp2))
-
-        tb.write(instruction.operands[0], tmp2)
-
-    def _translate_setne(self, tb, instruction):
-        # Set byte if not equal (ZF=0).
-
-        imm0 = tb.immediate(1, 1)
-
-        tmp0 = tb.temporal(instruction.operands[0].size)
-
-        tb.add(self._builder.gen_xor(self._flags["zf"], imm0, tmp0))
-
-        tb.write(instruction.operands[0], tmp0)
-
-    def _translate_sete(self, tb, instruction):
-        # Set byte if equal (ZF=1).
-
-        imm0 = tb.immediate(1, 1)
-
-        tmp0 = tb.temporal(instruction.operands[0].size)
-
-        tb.add(self._builder.gen_and(self._flags["zf"], imm0, tmp0))
-
-        tb.write(instruction.operands[0], tmp0)
-
-    def _translate_setb(self, tb, instruction):
-        # Set byte if below (CF=1).
-
-        tb.write(instruction.operands[0], self._flags["cf"])
-
-    def _translate_setbe(self, tb, instruction):
-        # Set byte if below or equal (CF=1 or ZF=1).
-
-        tmp0 = tb.temporal(instruction.operands[0].size)
-
-        tb.add(self._builder.gen_or(self._flags["cf"], self._flags["zf"], tmp0))
-
-        tb.write(instruction.operands[0], tmp0)
-
-    def _translate_setae(self, tb, instruction):
-        # Set byte if above or equal (CF=0).
-
-        tmp0 = tb.temporal(instruction.operands[0].size)
-
-        tb.add(self._builder.gen_bisz(self._flags["cf"], tmp0))
-
-        tb.write(instruction.operands[0], tmp0)
-
-    def _translate_setg(self, tb, instruction):
-        # Set byte if greater (ZF=0 and SF=OF).
-
-        imm0 = tb.immediate(1, 1)
-
-        tmp0 = tb.temporal(8)
-        tmp1 = tb.temporal(1)
-        tmp2 = tb.temporal(1)
-        tmp3 = tb.temporal(instruction.operands[0].size)
-
-        tb.add(self._builder.gen_sub(self._flags["sf"], self._flags["of"], tmp0))
-        tb.add(self._builder.gen_bisz(tmp0, tmp1))
-        tb.add(self._builder.gen_xor(self._flags["zf"], imm0, tmp2))
-        tb.add(self._builder.gen_and(tmp1, tmp2, tmp3))
-
-        tb.write(instruction.operands[0], tmp3)
-
 # "Control Transfer Instructions"
 # ============================================================================ #
     def _translate_address(self, tb, oprnd):
@@ -2226,267 +2221,80 @@ class X86Translator(object):
 
         tb.add(self._builder.gen_jcc(imm0, addr_oprnd))
 
+    def _translate_jcc(self, tb, instruction, jcc_cond):
+        # Jump if condition (jcc_cond) is met.
+        # Flags Affected
+        # None.
+
+        eval_cond_fn_name = "_evaluate_" + jcc_cond
+        eval_cond_fn = getattr(self, eval_cond_fn_name, self._not_implemented)
+
+        oprnd0 = tb.read(instruction.operands[0])
+
+        addr_oprnd = self._translate_address(tb, oprnd0)
+
+        tb.add(self._builder.gen_jcc(eval_cond_fn(tb), addr_oprnd))
+
     def _translate_ja(self, tb, instruction):
-        # Jump near if above (CF=0 and ZF=0).
-
-        oprnd0 = tb.read(instruction.operands[0])
-
-        addr_oprnd = self._translate_address(tb, oprnd0)
-
-        imm0 = tb.immediate(1, 1)
-
-        tmp0 = tb.temporal(1)
-        tmp1 = tb.temporal(1)
-        tmp2 = tb.temporal(1)
-
-        tb.add(self._builder.gen_xor(self._flags["cf"], imm0, tmp0))
-        tb.add(self._builder.gen_xor(self._flags["zf"], imm0, tmp1))
-        tb.add(self._builder.gen_and(tmp0, tmp1, tmp2))
-        tb.add(self._builder.gen_jcc(tmp2, addr_oprnd))
-
-    def _translate_jo(self, tb, instruction):
-        # Jump near if overflow (OF=1).
-
-        oprnd0 = tb.read(instruction.operands[0])
-
-        addr_oprnd = self._translate_address(tb, oprnd0)
-
-        tb.add(self._builder.gen_jcc(self._flags["of"], addr_oprnd))
-
-    def _translate_jbe(self, tb, instruction):
-        # Jump near if below or equal (CF=1 or ZF=1).
-
-        oprnd0 = tb.read(instruction.operands[0])
-
-        addr_oprnd = self._translate_address(tb, oprnd0)
-
-        tmp0 = tb.temporal(1)
-
-        tb.add(self._builder.gen_or(self._flags["cf"], self._flags["zf"], tmp0))
-        tb.add(self._builder.gen_jcc(tmp0, addr_oprnd))
-
-    def _translate_jl(self, tb, instruction):
-        # Jump near if less (SF!=OF).
-
-        oprnd0 = tb.read(instruction.operands[0])
-
-        addr_oprnd = self._translate_address(tb, oprnd0)
-
-        imm0 = tb.immediate(1, 1)
-
-        tmp0 = tb.temporal(8)
-        tmp1 = tb.temporal(1)
-        tmp2 = tb.temporal(1)
-
-        tb.add(self._builder.gen_sub(self._flags["sf"], self._flags["of"], tmp0))
-        tb.add(self._builder.gen_bisz(tmp0, tmp1))
-        tb.add(self._builder.gen_xor(tmp1, imm0, tmp2))
-        tb.add(self._builder.gen_jcc(tmp2, addr_oprnd))
-
-    def _translate_je(self, tb, instruction):
-        # Jump near if equal (ZF=1).
-
-        oprnd0 = tb.read(instruction.operands[0])
-
-        addr_oprnd = self._translate_address(tb, oprnd0)
-
-        tb.add(self._builder.gen_jcc(self._flags["zf"], addr_oprnd))
-
-    def _translate_jp(self, tb, instruction):
-        # Jump near if equal (PF=1).
-
-        oprnd0 = tb.read(instruction.operands[0])
-
-        addr_oprnd = self._translate_address(tb, oprnd0)
-
-        tb.add(self._builder.gen_jcc(self._flags["pf"], addr_oprnd))
-
-
-    def _translate_js(self, tb, instruction):
-        # Jump near if sign (SF=1).
-
-        oprnd0 = tb.read(instruction.operands[0])
-
-        addr_oprnd = self._translate_address(tb, oprnd0)
-
-        tb.add(self._builder.gen_jcc(self._flags["sf"], addr_oprnd))
-
-    def _translate_jg(self, tb, instruction):
-        # Jump near if greater (ZF=0 and SF=OF).
-
-        oprnd0 = tb.read(instruction.operands[0])
-
-        addr_oprnd = self._translate_address(tb, oprnd0)
-
-        imm0 = tb.immediate(1, 1)
-
-        tmp0 = tb.temporal(8)
-        tmp1 = tb.temporal(1)
-        tmp2 = tb.temporal(1)
-        tmp3 = tb.temporal(1)
-
-        tb.add(self._builder.gen_sub(self._flags["sf"], self._flags["of"], tmp0))
-        tb.add(self._builder.gen_bisz(tmp0, tmp1))
-        tb.add(self._builder.gen_xor(self._flags["zf"], imm0, tmp2))
-        tb.add(self._builder.gen_and(tmp1, tmp2, tmp3))
-        tb.add(self._builder.gen_jcc(tmp3, addr_oprnd))
-
-    def _translate_jge(self, tb, instruction):
-        # Jump near if greater or equal (SF=OF).
-
-        oprnd0 = tb.read(instruction.operands[0])
-
-        addr_oprnd = self._translate_address(tb, oprnd0)
-
-        tmp0 = tb.temporal(8)
-        tmp1 = tb.temporal(1)
-
-        tb.add(self._builder.gen_sub(self._flags["sf"], self._flags["of"], tmp0))
-        tb.add(self._builder.gen_bisz(tmp0, tmp1))
-        tb.add(self._builder.gen_jcc(tmp1, addr_oprnd))
-
+        self._translate_jcc(tb, instruction, 'a')
     def _translate_jae(self, tb, instruction):
-        # Jump near if above or equal (CF=0).
-
-        oprnd0 = tb.read(instruction.operands[0])
-
-        addr_oprnd = self._translate_address(tb, oprnd0)
-
-        tmp0 = tb.temporal(1)
-
-        tb.add(self._builder.gen_bisz(self._flags["cf"], tmp0))
-        tb.add(self._builder.gen_jcc(tmp0, addr_oprnd))
-
-    def _translate_jno(self, tb, instruction):
-        # Jump near if not overflow (OF=0).
-
-        oprnd0 = tb.read(instruction.operands[0])
-
-        addr_oprnd = self._translate_address(tb, oprnd0)
-
-        tmp0 = tb.temporal(1)
-
-        tb.add(self._builder.gen_bisz(self._flags["of"], tmp0))
-        tb.add(self._builder.gen_jcc(tmp0, addr_oprnd))
-
-    def _translate_jns(self, tb, instruction):
-        # Jump near if not sign (SF=0).
-
-        oprnd0 = tb.read(instruction.operands[0])
-
-        addr_oprnd = self._translate_address(tb, oprnd0)
-
-        tmp0 = tb.temporal(1)
-
-        tb.add(self._builder.gen_bisz(self._flags["sf"], tmp0))
-        tb.add(self._builder.gen_jcc(tmp0, addr_oprnd))
-
+        self._translate_jcc(tb, instruction, 'ae')
     def _translate_jb(self, tb, instruction):
-        # Jump near if below (CF=1).
-
-        oprnd0 = tb.read(instruction.operands[0])
-
-        addr_oprnd = self._translate_address(tb, oprnd0)
-
-        tb.add(self._builder.gen_jcc(self._flags["cf"], addr_oprnd))
-
-    def _translate_jle(self, tb, instruction):
-        # Jump near if less or equal (ZF=1 or SF!=OF).
-
-        oprnd0 = tb.read(instruction.operands[0])
-
-        addr_oprnd = self._translate_address(tb, oprnd0)
-
-        imm0 = tb.immediate(1, 1)
-
-        tmp0 = tb.temporal(8)
-        tmp1 = tb.temporal(1)
-        tmp2 = tb.temporal(1)
-        tmp3 = tb.temporal(1)
-
-        tb.add(self._builder.gen_sub(self._flags["sf"], self._flags["of"], tmp0))
-        tb.add(self._builder.gen_bisz(tmp0, tmp1))
-        tb.add(self._builder.gen_xor(tmp1, imm0, tmp2))
-        tb.add(self._builder.gen_or(tmp2, self._flags["zf"], tmp3))
-        tb.add(self._builder.gen_jcc(tmp3, addr_oprnd))
-
-    def _translate_jz(self, tb, instruction):
-        # Jump near if 0 (ZF=1).
-
-        oprnd0 = tb.read(instruction.operands[0])
-
-        addr_oprnd = self._translate_address(tb, oprnd0)
-
-        tb.add(self._builder.gen_jcc(self._flags["zf"], addr_oprnd))
-
-    def _translate_jne(self, tb, instruction):
-        # Jump near if not equal (ZF=0).
-
-        oprnd0 = tb.read(instruction.operands[0])
-
-        addr_oprnd = self._translate_address(tb, oprnd0)
-
-        imm0 = tb.immediate(1, 1)
-
-        tmp0 = tb.temporal(1)
-
-        tb.add(self._builder.gen_xor(self._flags["zf"], imm0, tmp0))
-        tb.add(self._builder.gen_jcc(tmp0, addr_oprnd))
-
-    def _translate_jnz(self, tb, instruction):
-        # Jump near if not zero (ZF=0).
-
-        oprnd0 = tb.read(instruction.operands[0])
-
-        addr_oprnd = self._translate_address(tb, oprnd0)
-
-        imm0 = tb.immediate(1, 1)
-
-        tmp0 = tb.temporal(1)
-
-        tb.add(self._builder.gen_xor(self._flags["zf"], imm0, tmp0))
-        tb.add(self._builder.gen_jcc(tmp0, addr_oprnd))
-
-    def _translate_jnbe(self, tb, instruction):
-        # Jump near if not below or equal (CF=0 and ZF=0).
-
-        oprnd0 = tb.read(instruction.operands[0])
-
-        addr_oprnd = self._translate_address(tb, oprnd0)
-
-        imm0 = tb.immediate(1, 1)
-
-        tmp0 = tb.temporal(1)
-        tmp1 = tb.temporal(1)
-        tmp2 = tb.temporal(1)
-
-        tb.add(self._builder.gen_xor(self._flags["cf"], imm0, tmp0))
-        tb.add(self._builder.gen_xor(self._flags["zf"], imm0, tmp1))
-        tb.add(self._builder.gen_and(tmp0, tmp1, tmp2))
-        tb.add(self._builder.gen_jcc(tmp2, addr_oprnd))
-
+        self._translate_jcc(tb, instruction, 'b')
+    def _translate_jbe(self, tb, instruction):
+        self._translate_jcc(tb, instruction, 'be')
     def _translate_jc(self, tb, instruction):
-        # Jump near if carry (CF=1).
-
-        oprnd0 = tb.read(instruction.operands[0])
-
-        addr_oprnd = self._translate_address(tb, oprnd0)
-
-        tb.add(self._builder.gen_jcc(self._flags["cf"], addr_oprnd))
-
+        self._translate_jcc(tb, instruction, 'c')
+    def _translate_je(self, tb, instruction):
+        self._translate_jcc(tb, instruction, 'e')
+    def _translate_jg(self, tb, instruction):
+        self._translate_jcc(tb, instruction, 'g')
+    def _translate_jge(self, tb, instruction):
+        self._translate_jcc(tb, instruction, 'ge')
+    def _translate_jl(self, tb, instruction):
+        self._translate_jcc(tb, instruction, 'l')
+    def _translate_jle(self, tb, instruction):
+        self._translate_jcc(tb, instruction, 'le')
+    def _translate_jna(self, tb, instruction):
+        self._translate_jcc(tb, instruction, 'na')
+    def _translate_jnae(self, tb, instruction):
+        self._translate_jcc(tb, instruction, 'nae')
+    def _translate_jnb(self, tb, instruction):
+        self._translate_jcc(tb, instruction, 'nb')
+    def _translate_jnbe(self, tb, instruction):
+        self._translate_jcc(tb, instruction, 'nbe')
     def _translate_jnc(self, tb, instruction):
-        # Jump near if not carry (CF=0).
-
-        oprnd0 = tb.read(instruction.operands[0])
-
-        addr_oprnd = self._translate_address(tb, oprnd0)
-
-        imm0 = tb.immediate(1, 1)
-
-        tmp0 = tb.temporal(1)
-
-        tb.add(self._builder.gen_xor(self._flags["cf"], imm0, tmp0))
-        tb.add(self._builder.gen_jcc(tmp0, addr_oprnd))
+        self._translate_jcc(tb, instruction, 'nc')
+    def _translate_jne(self, tb, instruction):
+        self._translate_jcc(tb, instruction, 'ne')
+    def _translate_jng(self, tb, instruction):
+        self._translate_jcc(tb, instruction, 'ng')
+    def _translate_jnge(self, tb, instruction):
+        self._translate_jcc(tb, instruction, 'nge')
+    def _translate_jnl(self, tb, instruction):
+        self._translate_jcc(tb, instruction, 'nl')
+    def _translate_jnle(self, tb, instruction):
+        self._translate_jcc(tb, instruction, 'nle')
+    def _translate_jno(self, tb, instruction):
+        self._translate_jcc(tb, instruction, 'no')
+    def _translate_jnp(self, tb, instruction):
+        self._translate_jcc(tb, instruction, 'np')
+    def _translate_jns(self, tb, instruction):
+        self._translate_jcc(tb, instruction, 'ns')
+    def _translate_jnz(self, tb, instruction):
+        self._translate_jcc(tb, instruction, 'nz')
+    def _translate_jo(self, tb, instruction):
+        self._translate_jcc(tb, instruction, 'o')
+    def _translate_jp(self, tb, instruction):
+        self._translate_jcc(tb, instruction, 'p')
+    def _translate_jpe(self, tb, instruction):
+        self._translate_jcc(tb, instruction, 'pe')
+    def _translate_jpo(self, tb, instruction):
+        self._translate_jcc(tb, instruction, 'po')
+    def _translate_js(self, tb, instruction):
+        self._translate_jcc(tb, instruction, 's')
+    def _translate_jz(self, tb, instruction):
+        self._translate_jcc(tb, instruction, 'z')
 
     def _translate_jecxz(self, tb, instruction):
         # Jump short if ECX register is 0.
