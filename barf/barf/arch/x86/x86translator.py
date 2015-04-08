@@ -290,7 +290,9 @@ class X86Translator(object):
         try:
             trans_instrs = self._translate(instruction)
         except NotImplementedError:
-            trans_instrs = [self._builder.gen_unkn()]
+            unkn_instr = self._builder.gen_unkn()
+            unkn_instr.address = instruction.address << 8 | (0x0 & 0xff)
+            trans_instrs = [unkn_instr]
 
             self._log_not_supported_instruction(instruction)
         except:
@@ -511,6 +513,127 @@ class X86Translator(object):
 
         tb.add(self._builder.gen_str(imm, flag))
 
+    # above (CF=0 and ZF=0).
+    def _evaluate_a(self, tb):
+        return tb._and_regs(tb._negate_reg(self._flags["cf"]), tb._negate_reg(self._flags["zf"]))
+
+    # above or equal (CF=0)
+    def _evaluate_ae(self, tb):
+        return tb._negate_reg(self._flags["cf"])
+
+    # below (CF=1)
+    def _evaluate_b(self, tb):
+        return self._flags["cf"]
+
+    # below or equal (CF=1 or ZF=1)
+    def _evaluate_be(self, tb):
+        return tb._or_regs(self._flags["cf"], self._flags["zf"])
+
+    # carry (CF=1)
+    def _evaluate_c(self, tb):
+        return self._flags["cf"]
+
+    # equal (ZF=1)
+    def _evaluate_e(self, tb):
+        return self._flags["zf"]
+
+    # greater (ZF=0 and SF=OF)
+    def _evaluate_g(self, tb):
+        return tb._and_regs(tb._negate_reg(self._flags["zf"]), tb._equal_regs(self._flags["sf"], self._flags["of"]))
+
+    # greater or equal (SF=OF)
+    def _evaluate_ge(self, tb):
+        return tb._equal_regs(self._flags["sf"], self._flags["of"])
+
+    # less (SF != OF)
+    def _evaluate_l(self, tb):
+        return tb._unequal_regs(self._flags["sf"], self._flags["of"])
+
+    # less or equal (ZF=1 or SF != OF)
+    def _evaluate_le(self, tb):
+        return tb._or_regs(self._flags["zf"], tb._unequal_regs(self._flags["sf"], self._flags["of"]))
+
+    # not above (CF=1 or ZF=1).
+    def _evaluate_na(self, tb):
+        return tb._or_regs(self._flags["cf"], self._flags["zf"])
+
+    # not above or equal (CF=1)
+    def _evaluate_nae(self, tb):
+        return self._flags["cf"]
+
+    # not below (CF=0)
+    def _evaluate_nb(self, tb):
+        return tb._negate_reg(self._flags["cf"])
+
+    # not below or equal (CF=0 and ZF=0)
+    def _evaluate_nbe(self, tb):
+        return tb._and_regs(tb._negate_reg(self._flags["cf"]), tb._negate_reg(self._flags["zf"]))
+
+    # not carry (CF=0)
+    def _evaluate_nc(self, tb):
+        return tb._negate_reg(self._flags["cf"])
+
+    # not equal (ZF=0)
+    def _evaluate_ne(self, tb):
+        return tb._negate_reg(self._flags["zf"])
+
+    # not greater (ZF=1 or SF != OF)
+    def _evaluate_ng(self, tb):
+        return tb._or_regs(self._flags["zf"], tb._unequal_regs(self._flags["sf"], self._flags["of"]))
+
+    # not greater or equal (SF != OF)
+    def _evaluate_nge(self, tb):
+        return tb._unequal_regs(self._flags["sf"], self._flags["of"])
+
+    # not less (SF=OF)
+    def _evaluate_nl(self, tb):
+        return tb._equal_regs(self._flags["sf"], self._flags["of"])
+
+    # not less or equal (ZF=0 and SF=OF)
+    def _evaluate_nle(self, tb):
+        return tb._and_regs(tb._negate_reg(self._flags["zf"]), tb._equal_regs(self._flags["sf"], self._flags["of"]))
+
+    # not overflow (OF=0)
+    def _evaluate_no(self, tb):
+        return tb._negate_reg(self._flags["of"])
+
+    # not parity (PF=0)
+    def _evaluate_np(self, tb):
+        return tb._negate_reg(self._flags["pf"])
+
+    # not sign (SF=0)
+    def _evaluate_ns(self, tb):
+        return tb._negate_reg(self._flags["sf"])
+
+    # not zero (ZF=0)
+    def _evaluate_nz(self, tb):
+        return tb._negate_reg(self._flags["zf"])
+
+    # overflow (OF=1)
+    def _evaluate_o(self, tb):
+        return self._flags["of"]
+
+    # parity (PF=1)
+    def _evaluate_p(self, tb):
+        return self._flags["pf"]
+
+    # parity even (PF=1)
+    def _evaluate_pe(self, tb):
+        return self._flags["pf"]
+
+    # parity odd (PF=0)
+    def _evaluate_po(self, tb):
+        return tb._negate_reg(self._flags["pf"])
+
+    # sign (SF=1)
+    def _evaluate_s(self, tb):
+        return self._flags["sf"]
+
+    # zero (ZF=1)
+    def _evaluate_z(self, tb):
+        return self._flags["zf"]
+
+
 # "Data Transfer Instructions"
 # ============================================================================ #
     def _translate_mov(self, tb, instruction):
@@ -529,53 +652,127 @@ class X86Translator(object):
 
         tb.write(instruction.operands[0], oprnd1)
 
+    def _translate_cmov(self, tb, instruction, cmov_cond):
+        # Move if condition (cmov_cond) is met.
+        # Flags Affected
+        # None.
+
+        eval_cond_fn = {
+            'a' : self._evaluate_a,
+            'ae' : self._evaluate_ae,
+            'b' : self._evaluate_b,
+            'be' : self._evaluate_be,
+            'c' : self._evaluate_c,
+            'e' : self._evaluate_e,
+            'g' : self._evaluate_g,
+            'ge' : self._evaluate_ge,
+            'l' : self._evaluate_l,
+            'le' : self._evaluate_le,
+            'na' : self._evaluate_na,
+            'nae' : self._evaluate_nae,
+            'nb' : self._evaluate_nb,
+            'nbe' : self._evaluate_nbe,
+            'nc' : self._evaluate_nc,
+            'ne' : self._evaluate_ne,
+            'ng' : self._evaluate_ng,
+            'nge' : self._evaluate_nge,
+            'nl' : self._evaluate_nl,
+            'nle' : self._evaluate_nle,
+            'no' : self._evaluate_no,
+            'np' : self._evaluate_np,
+            'ns' : self._evaluate_ns,
+            'nz' : self._evaluate_nz,
+            'o' : self._evaluate_o,
+            'p' : self._evaluate_p,
+            'pe' : self._evaluate_pe,
+            'po' : self._evaluate_po,
+            's' : self._evaluate_s,
+            'z' : self._evaluate_z,
+        }
+
+        # NOTE: CMOV pseudocode (not its description) specifies that in 32 bit registers, even
+        # if the condition is not met, the high 32 bits of the destiny are set to zero (DEST[63:32] <- 0).
+        # So op0 (dest) is assigned to itself, in 32 bits that doesn't change anything, in 64 it sets high bits
+        # to zero. Then if the condition is met the mov is performed and the previous assignment has no effect.
+        # op0 <- op0:
+        oprnd0 = tb.read(instruction.operands[0])
+        tmp = tb.temporal(oprnd0.size)
+        tb.add(self._builder.gen_str(oprnd0, tmp))
+        tb.write(instruction.operands[0], tmp)
+
+        cond_not_met = Label('cond_not_met')
+
+        neg_cond = tb._negate_reg(eval_cond_fn[cmov_cond](tb))
+
+        tb.add(self._builder.gen_jcc(neg_cond, cond_not_met))
+
+        oprnd1 = tb.read(instruction.operands[1])
+
+        tb.write(instruction.operands[0], oprnd1)
+
+        tb.add(cond_not_met)
+        tb.add(self._builder.gen_nop())
+
+    def _translate_cmova(self, tb, instruction):
+        self._translate_cmov(tb, instruction, 'a')
+    def _translate_cmovae(self, tb, instruction):
+        self._translate_cmov(tb, instruction, 'ae')
     def _translate_cmovb(self, tb, instruction):
-        # Move if below (CF=1).
-        # Flags Affected
-        # None.
-
-        oprnd0 = tb.read(instruction.operands[0])
-        oprnd1 = tb.read(instruction.operands[1])
-
-        imm0 = tb.immediate(1, 1)
-
-        tmp0 = tb.temporal(oprnd1.size)
-
-        move_lbl = Label('move')
-        exit_lbl = Label('exit')
-
-        tb.add(self._builder.gen_jcc(self._flags["cf"], move_lbl))
-        tb.add(self._builder.gen_str(oprnd0, tmp0))     # keep current value
-        tb.add(self._builder.gen_jcc(imm0, exit_lbl))
-        tb.add(move_lbl)
-        tb.add(self._builder.gen_str(oprnd1, tmp0))     # set new value
-        tb.add(exit_lbl)
-
-        tb.write(instruction.operands[0], tmp0)
-
+        self._translate_cmov(tb, instruction, 'b')
+    def _translate_cmovbe(self, tb, instruction):
+        self._translate_cmov(tb, instruction, 'be')
+    def _translate_cmovc(self, tb, instruction):
+        self._translate_cmov(tb, instruction, 'c')
     def _translate_cmove(self, tb, instruction):
-        # Move if equal (ZF=1).
-        # Flags Affected
-        # None.
-
-        oprnd0 = tb.read(instruction.operands[0])
-        oprnd1 = tb.read(instruction.operands[1])
-
-        imm0 = tb.immediate(1, 1)
-
-        tmp0 = tb.temporal(oprnd1.size)
-
-        move_lbl = Label('move')
-        exit_lbl = Label('exit')
-
-        tb.add(self._builder.gen_jcc(self._flags["zf"], move_lbl))
-        tb.add(self._builder.gen_str(oprnd0, tmp0))     # keep current value
-        tb.add(self._builder.gen_jcc(imm0, exit_lbl))
-        tb.add(move_lbl)
-        tb.add(self._builder.gen_str(oprnd1, tmp0))     # set new value
-        tb.add(exit_lbl)
-
-        tb.write(instruction.operands[0], tmp0)
+        self._translate_cmov(tb, instruction, 'e')
+    def _translate_cmovg(self, tb, instruction):
+        self._translate_cmov(tb, instruction, 'g')
+    def _translate_cmovge(self, tb, instruction):
+        self._translate_cmov(tb, instruction, 'ge')
+    def _translate_cmovl(self, tb, instruction):
+        self._translate_cmov(tb, instruction, 'l')
+    def _translate_cmovle(self, tb, instruction):
+        self._translate_cmov(tb, instruction, 'le')
+    def _translate_cmovna(self, tb, instruction):
+        self._translate_cmov(tb, instruction, 'na')
+    def _translate_cmovnae(self, tb, instruction):
+        self._translate_cmov(tb, instruction, 'nae')
+    def _translate_cmovnb(self, tb, instruction):
+        self._translate_cmov(tb, instruction, 'nb')
+    def _translate_cmovnbe(self, tb, instruction):
+        self._translate_cmov(tb, instruction, 'nbe')
+    def _translate_cmovnc(self, tb, instruction):
+        self._translate_cmov(tb, instruction, 'nc')
+    def _translate_cmovne(self, tb, instruction):
+        self._translate_cmov(tb, instruction, 'ne')
+    def _translate_cmovng(self, tb, instruction):
+        self._translate_cmov(tb, instruction, 'ng')
+    def _translate_cmovnge(self, tb, instruction):
+        self._translate_cmov(tb, instruction, 'nge')
+    def _translate_cmovnl(self, tb, instruction):
+        self._translate_cmov(tb, instruction, 'nl')
+    def _translate_cmovnle(self, tb, instruction):
+        self._translate_cmov(tb, instruction, 'nle')
+    def _translate_cmovno(self, tb, instruction):
+        self._translate_cmov(tb, instruction, 'no')
+    def _translate_cmovnp(self, tb, instruction):
+        self._translate_cmov(tb, instruction, 'np')
+    def _translate_cmovns(self, tb, instruction):
+        self._translate_cmov(tb, instruction, 'ns')
+    def _translate_cmovnz(self, tb, instruction):
+        self._translate_cmov(tb, instruction, 'nz')
+    def _translate_cmovo(self, tb, instruction):
+        self._translate_cmov(tb, instruction, 'o')
+    def _translate_cmovp(self, tb, instruction):
+        self._translate_cmov(tb, instruction, 'p')
+    def _translate_cmovpe(self, tb, instruction):
+        self._translate_cmov(tb, instruction, 'pe')
+    def _translate_cmovpo(self, tb, instruction):
+        self._translate_cmov(tb, instruction, 'po')
+    def _translate_cmovs(self, tb, instruction):
+        self._translate_cmov(tb, instruction, 's')
+    def _translate_cmovz(self, tb, instruction):
+        self._translate_cmov(tb, instruction, 'z')
 
     def _translate_xchg(self, tb, instruction):
         # Flags Affected
@@ -614,6 +811,73 @@ class X86Translator(object):
         tb.add(self._builder.gen_ldm(self._sp, oprnd0))
         tb.add(self._builder.gen_add(self._sp, self._ws, tmp0))
         tb.add(self._builder.gen_str(tmp0, self._sp))
+
+    def _translate_cmpxchg(self, tb, instruction):
+        # Flags Affected
+        # The ZF flag is set if the values in the destination operand
+        # and register AL, AX, or EAX are equal; otherwise it is
+        # cleared. The CF, PF, AF, SF, and OF flags are set according
+        # to the results of the comparison operation.
+
+        # Accumulator = AL, AX, EAX, or RAX depending on whether a byte,
+        # word, doubleword, or quadword comparison is being performed
+        # IF accumulator = DEST
+        # THEN
+        #   ZF <- 1;
+        #   DEST <- SRC;
+        # ELSE
+        #   ZF <- 0;
+        #   accumulator <- DEST;
+        # FI;
+
+        oprnd0 = tb.read(instruction.operands[0])
+        oprnd1 = tb.read(instruction.operands[1])
+
+        # Define immediate registers
+        end_addr = ReilImmediateOperand((instruction.address + instruction.size) << 8, self._arch_info.address_size + 8)
+
+        # Define accum register.
+        if oprnd0.size == 8:
+            accum = ReilRegisterOperand("al", 8)
+            accum_x86 = X86RegisterOperand("al", 8)
+        elif oprnd0.size == 16:
+            accum = ReilRegisterOperand("ax", 16)
+            accum_x86 = X86RegisterOperand("ax", 16)
+        elif oprnd0.size == 32:
+            accum = ReilRegisterOperand("eax", 32)
+            accum_x86 = X86RegisterOperand("eax", 32)
+        elif oprnd0.size == 64:
+            accum = ReilRegisterOperand("rax", 64)
+            accum_x86 = X86RegisterOperand("rax", 64)
+        else:
+            raise Exception("Invalid operand size: %s" % oprnd0)
+
+        tmp0 = tb.temporal(oprnd0.size*2)
+
+        one = tb.immediate(1, 1)
+
+        change_dst_lbl = Label('change_dst')
+        change_accum_lbl = Label('change_accum')
+
+        # Compare.
+        tb.add(self._builder.gen_sub(accum, oprnd0, tmp0))
+
+        # Update flags : CF, OF, SF, ZF, AF, PF
+        self._update_cf(tb, accum, oprnd0, tmp0)
+        self._update_of_sub(tb, accum, oprnd0, tmp0)
+        self._update_sf(tb, accum, oprnd0, tmp0)
+        self._update_zf(tb, accum, oprnd0, tmp0)
+        self._update_af(tb, accum, oprnd0, tmp0)
+        self._update_pf(tb, accum, oprnd0, tmp0)
+
+        # Exchange
+        tb.add(self._builder.gen_jcc(tmp0, change_accum_lbl))
+        tb.add(change_dst_lbl)
+        tb.write(instruction.operands[0], oprnd1)
+        tb.add(self._builder.gen_jcc(one, end_addr))
+        tb.add(change_accum_lbl)
+        # tb.add(self._builder.gen_str(oprnd0, accum))
+        tb.write(accum_x86, oprnd0)
 
 # "Binary Arithmetic Instructions"
 # ============================================================================ #
@@ -700,21 +964,23 @@ class X86Translator(object):
         tmp0 = tb.temporal(oprnd0.size*2)
         tmp1 = tb.temporal(oprnd0.size*2)
         tmp2 = tb.temporal(oprnd0.size*2)
+        tmp3 = tb.temporal(oprnd0.size)
+        tmp4 = tb.temporal(oprnd0.size)
 
-        # FIX: This translation generates a wrong result for the OF flag
-        # for some inputs.
         tb.add(self._builder.gen_sub(oprnd0, oprnd1, tmp0))
         tb.add(self._builder.gen_str(self._flags["cf"], tmp1))
-        tb.add(self._builder.gen_sub(oprnd0, oprnd1, tmp2))
+        tb.add(self._builder.gen_sub(tmp0, tmp1, tmp2))
+        tb.add(self._builder.gen_str(tmp0, tmp3))
+        tb.add(self._builder.gen_str(tmp1, tmp4))
 
         if self._translation_mode == FULL_TRANSLATION:
             # Flags : OF, SF, ZF, AF, PF, CF
-            self._update_of_sub(tb, oprnd0, oprnd1, tmp2)
-            self._update_sf(tb, oprnd0, oprnd1, tmp2)
-            self._update_zf(tb, oprnd0, oprnd1, tmp2)
-            self._update_af(tb, oprnd0, oprnd1, tmp2)
-            self._update_pf(tb, oprnd0, oprnd1, tmp2)
-            self._update_cf(tb, oprnd0, oprnd1, tmp2)
+            self._update_of_sub(tb, tmp3, tmp4, tmp2)
+            self._update_sf(tb, tmp3, tmp4, tmp2)
+            self._update_zf(tb, tmp3, tmp4, tmp2)
+            self._update_af(tb, tmp3, tmp4, tmp2)
+            self._update_pf(tb, tmp3, tmp4, tmp2)
+            self._update_cf(tb, tmp3, tmp4, tmp2)
 
         tb.write(instruction.operands[0], tmp2)
 
@@ -1794,6 +2060,40 @@ class X86Translator(object):
 
 # "Bit and Byte Instructions"
 # ============================================================================ #
+    def _translate_bt(self, tb, instruction):
+        # Flags Affected
+        # The CF flag contains the value of the selected bit. The ZF
+        # flag is unaffected. The OF, SF, AF, and PF flags are
+        # undefined.
+
+        oprnd0 = tb.read(instruction.operands[0])
+        oprnd1 = tb.read(instruction.operands[1])
+
+        tmp0 = tb.temporal(oprnd0.size)
+        zero = tb.immediate(0, oprnd0.size)
+        one = tb.immediate(1, oprnd0.size)
+        bit_base_size = tb.immediate(oprnd0.size, oprnd1.size)
+        bit_offset_tmp = tb.temporal(oprnd0.size)
+        bit_offset = tb.temporal(oprnd0.size)
+
+        # Compute bit offset.
+        tb.add(self._builder.gen_mod(oprnd1, bit_base_size, bit_offset_tmp))
+        tb.add(self._builder.gen_sub(zero, bit_offset_tmp, bit_offset)) # negate
+
+        # Extract bit.
+        tb.add(self._builder.gen_bsh(oprnd0, bit_offset, tmp0))
+
+        # Set CF.
+        tb.add(self._builder.gen_and(tmp0, one, self._flags["cf"]))
+
+        # Set flags.
+        if self._translation_mode == FULL_TRANSLATION:
+            # Flags : OF, SF, AF, PF
+            self._undefine_flag(tb, self._flags["of"])
+            self._undefine_flag(tb, self._flags["sf"])
+            self._undefine_flag(tb, self._flags["af"])
+            self._undefine_flag(tb, self._flags["pf"])
+
     def _translate_test(self, tb, instruction):
         # Flags Affected
         # The OF and CF flags are set to 0. The SF, ZF, and PF flags are
