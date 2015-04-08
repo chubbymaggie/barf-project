@@ -57,18 +57,18 @@ logging.basicConfig(
     level=logging.DEBUG
 )
 
-VERBOSE = False
+logger = logging.getLogger(__name__)
 
 # Choose between SMT Solvers...
 SMT_SOLVER = "Z3"
 # SMT_SOLVER = "CVC4"
 
+
 class BARF(object):
     """Binary Analysis Framework."""
 
     def __init__(self, filename):
-        if VERBOSE:
-            print("[+] BARF: Initializing...")
+        logger.info("[+] BARF: Initializing...")
 
         self.code_analyzer = None
         self.ir_translator = None

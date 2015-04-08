@@ -3,11 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased][unreleased]
-### Fixed
-- Fixes in x86 instruction translations (mostly flags update issues.)
-- Fix missing registers in X86ArchitectureInformation class.
-- Fix SMT translation for STR instruction when dst operand is bigger than src operand.
 
+## [0.2.1] - 2015-04-07
+### Fixed
+- Fix Python logging module setup issue.
+
+## [0.2] - 2015-04-06
 ### Added
 - BARFgadgets now find gadgets in ARM binaries.
 - Add support for the ARM architecture (32 btis).
@@ -23,7 +24,14 @@ All notable changes to this project will be documented in this file.
 - Some methods of X86ArchitectureInformation class were renamed to improve naming consistency.
 - x86 flags are now represented using a single bit (instead of one byte). Also, each flag (CF, ZF, etc.) is now an alias of the correspondent bit of the {e/r}flags register.
 
+### Fixed
+- Fixes in x86 instruction translations (mostly flags update issues.)
+- Fix missing registers in X86ArchitectureInformation class.
+- Fix SMT translation for STR instruction when dst operand is bigger than src operand.
+
 ### Removed
 - x86instruction and x86intructiontranslator modules were removed.
 
-[unreleased]: https://github.com/programa-stic/barf-project/compare/v0.1...develop
+[unreleased]: https://github.com/programa-stic/barf-project/compare/v0.2.1...develop
+[0.2.1]: https://github.com/programa-stic/barf-project/compare/v0.2...v0.2.1
+[0.2]: https://github.com/programa-stic/barf-project/compare/v0.1...v0.2

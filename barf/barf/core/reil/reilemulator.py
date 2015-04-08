@@ -45,17 +45,21 @@ Byte addressable memory based on a dictionary.
 
 """
 
+import logging
 import random
 
 from barf.core.reil.reil import ReilImmediateOperand
 from barf.core.reil.reil import ReilMnemonic
 from barf.core.reil.reil import ReilRegisterOperand
 
+logger = logging.getLogger("reilemulator")
+
 verbose = False
 # verbose = True
 
 REIL_MEMORY_ENDIANNESS_LE = 0x0     # Little Endian
 REIL_MEMORY_ENDIANNESS_BE = 0x1     # Big Endian
+
 
 class ReilMemory(object):
 
@@ -279,6 +283,9 @@ class ReilEmulator(object):
 
             # Ad hoc Instructions
             ReilMnemonic.RET : self._execute_ret,
+
+            # Extensions
+            ReilMnemonic.SEXT : self._execute_sext,
         }
 
     def execute_lite(self, instructions, context=None):
@@ -321,12 +328,19 @@ class ReilEmulator(object):
             if verbose:
                 # print("    0x%08x:%02x : %s" % (self._ip >> 8, self._ip & 0xff, instr))
                 print "    %03d : %s" % (main_index, instr)
+                # logger.debug("    0x%08x:%02x : %s" % (self._ip >> 8, self._ip & 0xff, instr))
 
             # execute instruction
             next_addr = self._executors[instr.mnemonic](instr)
 
             # update instruction pointer
             if next_addr:
+                if end_address and next_addr == end_address:
+                    if verbose:
+                        print("[+] End address reached...")
+
+                    break
+
                 found = False
 
                 for idx, instrs in enumerate(instructions):
@@ -461,6 +475,7 @@ class ReilEmulator(object):
         # Debug
         if verbose:
             print "          r{ %s = %s (%s = %s) }" % (register, hex(value), base_reg_name, hex(self._regs[base_reg_name]))
+            # logger.debug("          r{ %s = %s (%s = %s) }" % (register, hex(value), base_reg_name, hex(self._regs[base_reg_name])))
 
         return value
 
@@ -481,6 +496,7 @@ class ReilEmulator(object):
         # Debug
         if verbose:
             print "          w{ %s = %s (%s = %s) }" % (register, hex(value), base_reg_name, hex(self._regs[base_reg_name]))
+            # logger.debug("          w{ %s = %s (%s = %s) }" % (register, hex(value), base_reg_name, hex(self._regs[base_reg_name])))
 
     def _extract_value(self, main_value, offset, size):
         return (main_value >> offset) & 2**size-1
@@ -691,7 +707,7 @@ class ReilEmulator(object):
         op1_val = self._get_operand_value(instr.operands[0])
         op3_val = self._get_operand_value(instr.operands[2])
 
-        if op1_val == 1:
+        if op1_val != 0:
             return op3_val
         else:
             return None
@@ -723,3 +739,22 @@ class ReilEmulator(object):
         """Execute RET instruction.
         """
         pass
+
+    # Extension
+    # ======================================================================== #
+    def _execute_sext(self, instr):
+        """Execute SEXT instruction.
+        """
+        op1_size = instr.operands[0].size
+        op3_size = instr.operands[2].size
+
+        op1_val = self._get_operand_value(instr.operands[0])
+        op1_msb = op1_val >> (op1_size-1)
+
+        op3_mask = (2**op3_size-1) & ~(2**op1_size-1) if op1_msb == 1 else 0x0
+
+        op3_val = op1_val | op3_mask
+
+        self._set_reg_value(instr.operands[2], op3_val, keep_track=True)
+
+        return None
