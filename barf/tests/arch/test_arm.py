@@ -23,6 +23,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import pickle
+import platform
 import random
 import unittest
 import struct
@@ -135,6 +136,8 @@ class ArmParser32BitsTests(unittest.TestCase):
             self.assertEqual(str(asm), i)
 
 
+@unittest.skipUnless(platform.machine().lower() == 'armv7l',
+                     'Not running on an ARMv7 system')
 class ArmTranslationTests(unittest.TestCase):
 
     def setUp(self):
@@ -150,7 +153,7 @@ class ArmTranslationTests(unittest.TestCase):
 
         self.reil_emulator.set_arch_registers(self.arch_info.registers_gp_all)
         self.reil_emulator.set_arch_registers_size(self.arch_info.registers_size)
-        self.reil_emulator.set_reg_access_mapper(self.arch_info.alias_mapper)
+        self.reil_emulator.set_arch_alias_mapper(self.arch_info.alias_mapper)
 
         self.context_filename = "failing_context.data"
 

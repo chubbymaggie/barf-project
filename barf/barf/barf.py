@@ -30,6 +30,7 @@ import logging
 import os
 import sys
 import time
+
 import arch
 
 from analysis.basicblock import BasicBlockBuilder
@@ -47,14 +48,14 @@ from arch.x86.x86disassembler import X86Disassembler
 from arch.x86.x86translator import X86Translator
 from core.bi import BinaryFile
 from core.reil import ReilEmulator
-from core.smt.smtlibv2 import Z3Solver
 from core.smt.smtlibv2 import CVC4Solver
+from core.smt.smtlibv2 import Z3Solver
 from core.dbg.debugger import ProcessControl, ProcessExit, ProcessSignal, ProcessEnd
 from core.dbg.testcase import GetTestcase, prepare_inputs
 from core.smt.smttranslator import SmtTranslator
 
 logging.basicConfig(
-    filename=os.path.dirname(os.path.realpath(__file__)) + os.sep + "log/barf." + str(int(time.time())) + ".log",
+    filename="barf.log",
     format="%(asctime)s: %(name)s:%(levelname)s: %(message)s",
     level=logging.DEBUG
 )
@@ -151,10 +152,10 @@ class BARF(object):
             self.ir_emulator.set_arch_registers(self.arch_info.registers_gp_all)
             self.ir_emulator.set_arch_flags(self.arch_info.registers_flags)
             self.ir_emulator.set_arch_registers_size(self.arch_info.registers_size)
-            self.ir_emulator.set_reg_access_mapper(self.arch_info.alias_mapper)
+            self.ir_emulator.set_arch_alias_mapper(self.arch_info.alias_mapper)
 
             if SMT_SOLVER is not None:
-                self.smt_translator.set_reg_access_mapper(self.arch_info.alias_mapper)
+                self.smt_translator.set_arch_alias_mapper(self.arch_info.alias_mapper)
                 self.smt_translator.set_arch_registers_size(self.arch_info.registers_size)
 
     def _setup_analysis_modules(self):
