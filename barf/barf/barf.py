@@ -63,10 +63,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Choose between SMT Solvers...
+SMT_SOLVER = "Z3"
+# SMT_SOLVER = "CVC4"
 # SMT_SOLVER = None
-SMT_SOLVER  = "Z3"
-# SMT_SOLVER  = "CVC4"
-
 
 class BARF(object):
     """Binary Analysis Framework."""
@@ -137,8 +136,15 @@ class BARF(object):
         self.smt_translator = None
 
         if self.arch_info:
+            # Set REIL emulator.
             self.ir_emulator = ReilEmulator(self.arch_info.address_size)
 
+            self.ir_emulator.set_arch_registers(self.arch_info.registers_gp_all)
+            self.ir_emulator.set_arch_flags(self.arch_info.registers_flags)
+            self.ir_emulator.set_arch_registers_size(self.arch_info.registers_size)
+            self.ir_emulator.set_arch_alias_mapper(self.arch_info.alias_mapper)
+
+            # Set SMT Solver.
             if SMT_SOLVER == "Z3":
                 self.smt_solver = Z3Solver()
             elif SMT_SOLVER == "CVC4":
@@ -146,15 +152,10 @@ class BARF(object):
             elif SMT_SOLVER is not None:
                 raise Exception("Invalid SMT solver.")
 
-            if SMT_SOLVER is not None:
+            # Set SMT translator.
+            if self.smt_solver:
                 self.smt_translator = SmtTranslator(self.smt_solver, self.arch_info.address_size)
 
-            self.ir_emulator.set_arch_registers(self.arch_info.registers_gp_all)
-            self.ir_emulator.set_arch_flags(self.arch_info.registers_flags)
-            self.ir_emulator.set_arch_registers_size(self.arch_info.registers_size)
-            self.ir_emulator.set_arch_alias_mapper(self.arch_info.alias_mapper)
-
-            if SMT_SOLVER is not None:
                 self.smt_translator.set_arch_alias_mapper(self.arch_info.alias_mapper)
                 self.smt_translator.set_arch_registers_size(self.arch_info.registers_size)
 
