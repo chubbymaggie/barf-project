@@ -30,6 +30,7 @@ import logging
 import os
 import sys
 import time
+
 import arch
 
 from analysis.basicblock import BasicBlockBuilder
@@ -47,14 +48,14 @@ from arch.x86.x86disassembler import X86Disassembler
 from arch.x86.x86translator import X86Translator
 from core.bi import BinaryFile
 from core.reil import ReilEmulator
-from core.smt.smtlibv2 import Z3Solver
 from core.smt.smtlibv2 import CVC4Solver
+from core.smt.smtlibv2 import Z3Solver
 from core.dbg.debugger import ProcessControl, ProcessExit, ProcessSignal, ProcessEnd
 from core.dbg.testcase import GetTestcase, prepare_inputs
 from core.smt.smttranslator import SmtTranslator
 
 logging.basicConfig(
-    filename=os.path.dirname(os.path.realpath(__file__)) + os.sep + "log/barf." + str(int(time.time())) + ".log",
+    filename="barf.log",
     format="%(asctime)s: %(name)s:%(levelname)s: %(message)s",
     level=logging.DEBUG
 )
@@ -62,10 +63,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Choose between SMT Solvers...
+SMT_SOLVER = "Z3"
+# SMT_SOLVER = "CVC4"
 # SMT_SOLVER = None
-SMT_SOLVER  = "Z3"
-# SMT_SOLVER  = "CVC4"
-
 
 class BARF(object):
     """Binary Analysis Framework."""
@@ -136,8 +136,15 @@ class BARF(object):
         self.smt_translator = None
 
         if self.arch_info:
+            # Set REIL emulator.
             self.ir_emulator = ReilEmulator(self.arch_info.address_size)
 
+            self.ir_emulator.set_arch_registers(self.arch_info.registers_gp_all)
+            self.ir_emulator.set_arch_flags(self.arch_info.registers_flags)
+            self.ir_emulator.set_arch_registers_size(self.arch_info.registers_size)
+            self.ir_emulator.set_arch_alias_mapper(self.arch_info.alias_mapper)
+
+            # Set SMT Solver.
             if SMT_SOLVER == "Z3":
                 self.smt_solver = Z3Solver()
             elif SMT_SOLVER == "CVC4":
@@ -145,16 +152,11 @@ class BARF(object):
             elif SMT_SOLVER is not None:
                 raise Exception("Invalid SMT solver.")
 
-            if SMT_SOLVER is not None:
+            # Set SMT translator.
+            if self.smt_solver:
                 self.smt_translator = SmtTranslator(self.smt_solver, self.arch_info.address_size)
 
-            self.ir_emulator.set_arch_registers(self.arch_info.registers_gp_all)
-            self.ir_emulator.set_arch_flags(self.arch_info.registers_flags)
-            self.ir_emulator.set_arch_registers_size(self.arch_info.registers_size)
-            self.ir_emulator.set_reg_access_mapper(self.arch_info.alias_mapper)
-
-            if SMT_SOLVER is not None:
-                self.smt_translator.set_reg_access_mapper(self.arch_info.alias_mapper)
+                self.smt_translator.set_arch_alias_mapper(self.arch_info.alias_mapper)
                 self.smt_translator.set_arch_registers_size(self.arch_info.registers_size)
 
     def _setup_analysis_modules(self):
@@ -312,6 +314,45 @@ class BARF(object):
         bb_list = self.bb_builder.build(start_addr, end_addr)
 
         return bb_list
+
+    def emulate_reil(self, context, instrs):
+        """Emulate REIL instructions.
+
+        :param context: processor context
+        :type context: dict
+
+        :returns: a context
+        :rtype: dict
+
+        """
+        start_addr = instrs[0].address#ea_start if ea_start else self.binary.ea_start
+        end_addr = instrs[-1].address#ea_end if ea_end else self.binary.ea_end
+
+        # load registers
+        if 'registers' in context:
+            for reg, val in context['registers'].items():
+                self.ir_emulator.registers[reg] = val
+
+        # load memory
+        if 'memory' in context:
+            for addr, val in context['memory'].items():
+                self.ir_emulator.memory.write(addr, 32, val)
+
+        #instrs = [reil for _, _, reil in self.translate(ea_start, ea_end)]
+
+        self.ir_emulator.execute([instrs], start_addr, end_address=end_addr)
+
+        context_out = {}
+
+        # save registers
+        context_out['registers'] = {}
+        for reg, val in self.ir_emulator.registers.items():
+            context_out['registers'][reg] = val
+
+        # save memory
+        context_out['memory'] = {}
+
+        return context_out
 
     def emulate_full(self, context, ea_start=None, ea_end=None):
         """Emulate REIL instructions.

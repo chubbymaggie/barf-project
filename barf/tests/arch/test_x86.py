@@ -24,6 +24,7 @@
 
 import os
 import pickle
+import platform
 import random
 import unittest
 
@@ -125,6 +126,9 @@ class X86Parser64BitsTests(unittest.TestCase):
 
         self.assertEqual(str(asm), "add byte ptr [rax+0xffffff89], cl")
 
+
+@unittest.skipUnless(platform.machine().lower() == 'x86_64',
+                     'Not running on an x86_64 system')
 class X86TranslationTests(unittest.TestCase):
 
     def setUp(self):
@@ -142,9 +146,9 @@ class X86TranslationTests(unittest.TestCase):
 
         self.reil_emulator.set_arch_registers(self.arch_info.registers_gp_all)
         self.reil_emulator.set_arch_registers_size(self.arch_info.registers_size)
-        self.reil_emulator.set_reg_access_mapper(self.arch_info.alias_mapper)
+        self.reil_emulator.set_arch_alias_mapper(self.arch_info.alias_mapper)
 
-        self.smt_translator.set_reg_access_mapper(self.arch_info.alias_mapper)
+        self.smt_translator.set_arch_alias_mapper(self.arch_info.alias_mapper)
         self.smt_translator.set_arch_registers_size(self.arch_info.registers_size)
 
         self.context_filename = "failing_context.data"
