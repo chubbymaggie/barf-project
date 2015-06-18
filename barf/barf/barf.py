@@ -51,18 +51,12 @@ from core.smt.smtlibv2 import CVC4Solver
 from core.smt.smtlibv2 import Z3Solver
 from core.smt.smttranslator import SmtTranslator
 
-logging.basicConfig(
-    filename=os.path.dirname(os.path.realpath(__file__)) + os.sep + "log/barf." + str(int(time.time())) + ".log",
-    format="%(asctime)s: %(name)s:%(levelname)s: %(message)s",
-    level=logging.DEBUG
-)
-
 logger = logging.getLogger(__name__)
 
 # Choose between SMT Solvers...
 SMT_SOLVER = "Z3"
 # SMT_SOLVER = "CVC4"
-
+# SMT_SOLVER = None
 
 class BARF(object):
     """Binary Analysis Framework."""
@@ -133,23 +127,28 @@ class BARF(object):
         self.smt_translator = None
 
         if self.arch_info:
+            # Set REIL emulator.
             self.ir_emulator = ReilEmulator(self.arch_info.address_size)
 
+            self.ir_emulator.set_arch_registers(self.arch_info.registers_gp_all)
+            self.ir_emulator.set_arch_flags(self.arch_info.registers_flags)
+            self.ir_emulator.set_arch_registers_size(self.arch_info.registers_size)
+            self.ir_emulator.set_arch_alias_mapper(self.arch_info.alias_mapper)
+
+            # Set SMT Solver.
             if SMT_SOLVER == "Z3":
                 self.smt_solver = Z3Solver()
             elif SMT_SOLVER == "CVC4":
                 self.smt_solver = CVC4Solver()
-            else:
+            elif SMT_SOLVER is not None:
                 raise Exception("Invalid SMT solver.")
 
-            self.smt_translator = SmtTranslator(self.smt_solver, self.arch_info.address_size)
+            # Set SMT translator.
+            if self.smt_solver:
+                self.smt_translator = SmtTranslator(self.smt_solver, self.arch_info.address_size)
 
-            self.ir_emulator.set_arch_registers(self.arch_info.registers_gp_all)
-            self.ir_emulator.set_arch_registers_size(self.arch_info.registers_size)
-            self.ir_emulator.set_reg_access_mapper(self.arch_info.alias_mapper)
-
-            self.smt_translator.set_reg_access_mapper(self.arch_info.alias_mapper)
-            self.smt_translator.set_arch_registers_size(self.arch_info.registers_size)
+                self.smt_translator.set_arch_alias_mapper(self.arch_info.alias_mapper)
+                self.smt_translator.set_arch_registers_size(self.arch_info.registers_size)
 
     def _setup_analysis_modules(self):
         """Set up analysis modules.
