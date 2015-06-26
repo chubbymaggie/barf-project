@@ -29,10 +29,12 @@ from barf.arch.x86.x86base import X86ArchitectureInformation
 from barf.arch.x86.x86parser import X86Parser
 from barf.arch.x86.x86translator import X86Translator
 from barf.core.reil import ReilEmulator
+from barf.core.reil import ReilEmulatorInvalidAddressError
+from barf.core.reil import ReilEmulatorZeroDivisionError
 from barf.core.reil import ReilMemory
-from barf.core.reil import ReilParser
 from barf.core.reil import ReilMnemonic
-
+from barf.core.reil import ReilParser
+from barf.core.reil import ReilRegisterOperand
 
 class ReilMemoryTests(unittest.TestCase):
 
@@ -118,6 +120,8 @@ class ReilEmulatorTests(unittest.TestCase):
         self._emulator.set_arch_alias_mapper(self._arch_info.alias_mapper)
 
         self._asm_parser = X86Parser()
+        self._reil_parser = ReilParser()
+
         self._translator = X86Translator()
 
     def test_add(self):
@@ -194,13 +198,6 @@ class ReilEmulatorTests(unittest.TestCase):
         regs_final, _ = self._emulator.execute_lite(reil_instrs, context=regs_initial)
 
         self.assertEqual(regs_final["eax"], 0xdead3412)
-
-    def __set_address(self, address, asm_instrs):
-        addr = address
-
-        for asm_instr in asm_instrs:
-            asm_instr.address = addr
-            addr += 1
 
     def test_pre_hanlder(self):
         def pre_hanlder(emulator, instruction, parameter):
@@ -328,42 +325,173 @@ class ReilEmulatorTests(unittest.TestCase):
 
         self.assertTrue(len(paramter) == 0)
 
-class ReilParserTests(unittest.TestCase):
+    def test_zero_division_error_1(self):
+        asm_instrs  = [self._asm_parser.parse("div ebx")]
+
+        self.__set_address(0xdeadbeef, asm_instrs)
+
+        reil_instrs  = self._translator.translate(asm_instrs[0])
+
+        regs_initial = {
+            "eax" : 0x2,
+            "edx" : 0x2,
+            "ebx" : 0x0,
+        }
+
+        self.assertRaises(ReilEmulatorZeroDivisionError, self._emulator.execute_lite, reil_instrs, context=regs_initial)
+
+    def test_zero_division_error_2(self):
+        instrs = ["mod [DWORD eax, DWORD ebx, DWORD t0]"]
+
+        reil_instrs = self._reil_parser.parse(instrs)
+
+        regs_initial = {
+            "eax" : 0x2,
+            "ebx" : 0x0,
+        }
+
+        self.assertRaises(ReilEmulatorZeroDivisionError, self._emulator.execute_lite, reil_instrs, context=regs_initial)
+
+    def test_invalid_address_error_1(self):
+        asm_instrs = [self._asm_parser.parse("jmp eax")]
+
+        self.__set_address(0xdeadbeef, asm_instrs)
+
+        reil_instrs = [self._translator.translate(asm_instrs[0])]
+
+        regs_initial = {
+            "eax" : 0xffffffff,
+        }
+
+        self.assertRaises(ReilEmulatorInvalidAddressError, self._emulator.execute, reil_instrs, 0xdeadbeef << 8, context=regs_initial)
+
+    def test_invalid_address_error_2(self):
+        asm_instrs = [self._asm_parser.parse("mov eax, 0xdeadbeef")]
+
+        self.__set_address(0xdeadbeef, asm_instrs)
+
+        reil_instrs = [self._translator.translate(asm_instrs[0])]
+
+        regs_initial = {
+            "eax" : 0xffffffff,
+        }
+
+        self.assertRaises(ReilEmulatorInvalidAddressError, self._emulator.execute, reil_instrs, 0xdeadbef0 << 8, context=regs_initial)
+
+    # Auxiliary methods
+    # ======================================================================== #
+    def __set_address(self, address, asm_instrs):
+        addr = address
+
+        for asm_instr in asm_instrs:
+            asm_instr.address = addr
+            addr += 1
+
+
+class ReilEmulatorTaintTests(unittest.TestCase):
 
     def setUp(self):
-        self._parser = ReilParser()
+        self._arch_info = X86ArchitectureInformation(ARCH_X86_MODE_32)
 
-    def test_add(self):
-        instrs  = ["str [eax, EMPTY, t0]"]
-        instrs += ["str [ebx, EMPTY, t1]"]
-        instrs += ["add [t0, t1, t2]"]
-        instrs += ["str [t2, EMPTY, eax]"]
+        self._emulator = ReilEmulator(self._arch_info.address_size)
 
-        instrs_parse = self._parser.parse(instrs)
+        self._emulator.set_arch_registers(self._arch_info.registers_gp_all)
+        self._emulator.set_arch_registers_size(self._arch_info.registers_size)
+        self._emulator.set_arch_alias_mapper(self._arch_info.alias_mapper)
 
-        self.assertEqual(str(instrs_parse[0]), "str   [UNK eax, EMPTY, UNK t0]")
-        self.assertEqual(str(instrs_parse[1]), "str   [UNK ebx, EMPTY, UNK t1]")
-        self.assertEqual(str(instrs_parse[2]), "add   [UNK t0, UNK t1, UNK t2]")
-        self.assertEqual(str(instrs_parse[3]), "str   [UNK t2, EMPTY, UNK eax]")
+        self._asm_parser = X86Parser()
+        self._translator = X86Translator()
 
-    def test_parse_operand_size(self):
-        instrs  = ["str [DWORD eax, EMPTY, DWORD t0]"]
-        instrs += ["str [eax, EMPTY, DWORD t0]"]
-        instrs += ["str [eax, EMPTY, t0]"]
+    def test_arithmetic(self):
+        asm_instrs  = self._asm_parser.parse("add eax, ebx")
 
-        instrs_parse = self._parser.parse(instrs)
+        self.__set_address(0xdeadbeef, [asm_instrs])
 
-        self.assertEqual(instrs_parse[0].operands[0].size, 32)
-        self.assertEqual(instrs_parse[0].operands[1].size, 0)
-        self.assertEqual(instrs_parse[0].operands[2].size, 32)
+        reil_instrs = self._translator.translate(asm_instrs)
 
-        self.assertEqual(instrs_parse[1].operands[0].size, None)
-        self.assertEqual(instrs_parse[1].operands[1].size, 0)
-        self.assertEqual(instrs_parse[1].operands[2].size, 32)
+        regs_initial = {
+            "eax" : 0x1,
+            "ebx" : 0x2,
+        }
 
-        self.assertEqual(instrs_parse[2].operands[0].size, None)
-        self.assertEqual(instrs_parse[2].operands[1].size, 0)
-        self.assertEqual(instrs_parse[2].operands[2].size, None)
+        self._emulator._set_register_taint(ReilRegisterOperand("ebx", 32), True)
+
+        regs_final, _ = self._emulator.execute_lite(
+            reil_instrs,
+            context=regs_initial
+        )
+
+        self.assertEqual(self._emulator._get_register_taint(ReilRegisterOperand("eax", 32)), True)
+
+    def test_store_mem_1(self):
+        asm_instrs  = self._asm_parser.parse("mov [eax], ebx")
+
+        self.__set_address(0xdeadbeef, [asm_instrs])
+
+        reil_instrs = self._translator.translate(asm_instrs)
+
+        regs_initial = {
+            "eax" : 0xcafecafe,
+            "ebx" : 0x2,
+        }
+
+        self._emulator._set_register_taint(ReilRegisterOperand("ebx", 32), True)
+
+        regs_final, _ = self._emulator.execute_lite(
+            reil_instrs,
+            context=regs_initial
+        )
+
+        self.assertEqual(self._emulator.get_memory_taint(regs_initial['eax'], 4 * 8), True)
+
+    def test_store_mem_2(self):
+        asm_instrs  = self._asm_parser.parse("mov [eax], ebx")
+
+        self.__set_address(0xdeadbeef, [asm_instrs])
+
+        reil_instrs = self._translator.translate(asm_instrs)
+
+        regs_initial = {
+            "eax" : 0xcafecafe,
+            "ebx" : 0x2,
+        }
+
+        self._emulator._set_register_taint(ReilRegisterOperand("eax", 32), True)
+
+        regs_final, _ = self._emulator.execute_lite(
+            reil_instrs,
+            context=regs_initial
+        )
+
+        self.assertEqual(self._emulator.get_memory_taint(regs_initial['eax'], 4 * 8), False)
+
+    def test_load_mem_1(self):
+        asm_instrs  = self._asm_parser.parse("mov eax, [ebx]")
+
+        self.__set_address(0xdeadbeef, [asm_instrs])
+
+        reil_instrs = self._translator.translate(asm_instrs)
+
+        regs_initial = {
+            "eax" : 0x2,
+            "ebx" : 0xcafecafe,
+        }
+
+        self._emulator.set_memory_taint(regs_initial["ebx"], 4 * 8, True)
+
+        regs_final, _ = self._emulator.execute_lite(
+            reil_instrs,
+            context=regs_initial
+        )
+
+        self.assertEqual(self._emulator._get_register_taint(ReilRegisterOperand("eax", 32)), True)
+
+    def __set_address(self, address, asm_instrs):
+        addr = address
+
+        for asm_instr in asm_instrs:
+            asm_instr.address = addr
+            addr += 1
 
 
 def main():
