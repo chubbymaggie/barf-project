@@ -250,6 +250,9 @@ class ReilMemory(object):
         # Write operations counter.
         self._write_count = 0
 
+    def written(self, address):
+        return self._memory.has_key(address)
+
     # Taint methods
     # ======================================================================== #
     def set_taint(self, address, size, taint):
