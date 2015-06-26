@@ -330,6 +330,11 @@ class BasicBlockGraph(object):
     def basic_blocks(self):
         return self._basic_blocks
 
+    @property
+    def basic_blocks_by_address(self):
+        return self._bb_by_addr
+
+
 class BasicBlockBuilder(object):
 
     """Basic block builder.
