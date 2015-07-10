@@ -54,12 +54,6 @@ from core.dbg.debugger import ProcessControl, ProcessExit, ProcessSignal, Proces
 from core.dbg.testcase import GetTestcase, prepare_inputs
 from core.smt.smttranslator import SmtTranslator
 
-logging.basicConfig(
-    filename="barf.log",
-    format="%(asctime)s: %(name)s:%(levelname)s: %(message)s",
-    level=logging.DEBUG
-)
-
 logger = logging.getLogger(__name__)
 
 # Choose between SMT Solvers...
