@@ -269,65 +269,10 @@ class ReilMemoryEx(ReilMemory):
     def get_write_count(self):
         """Get number of write operations performed on the memory.
         """
-        return self._write_count
-
-    def reset(self):
-        # Dictionary that implements the memory itself.
-        self._memory = {}
-
-        # Taint information.
-        self._taints = {}
-
-        # Previous state of memory. Requiere for some *special*
-        # functions.
-        self._memory_prev = {}
-
-        # Write operations counter.
-        self._write_count = 0
+        return self.__write_count
 
     def written(self, address):
         return self._memory.has_key(address)
-
-    # Taint methods
-    # ======================================================================== #
-    def set_taint(self, address, size, taint):
-        for i in xrange(0, size / 8):
-            self._taints[address + i] = taint
-
-    def get_taint(self, address, size):
-        tainted = False
-
-        for i in xrange(0, size / 8):
-            tainted = tainted or self._taints.get(address + i, False)
-
-        return tainted
-
-    # Debug methods
-    # ======================================================================== #
-    def _debug_read_memory(self, addr, val, tainted):
-        fmt = "{indent}r{{ m[{addr:08x}] = {val:08x} [{taint:s}]}}"
-        taint = "T" if tainted else "-"
-        msg = fmt.format(indent=" "*10, addr=addr, val=val, taint=taint)
-
-        print(msg)
-
-    def _debug_write_memory(self, addr, val, tainted):
-        fmt = "{indent}w{{ m[{addr:08x}] = {val:08x} [{taint:s}]}}"
-        taint = "T" if tainted else "-"
-        msg = fmt.format(indent=" "*10, addr=addr, val=val, taint=taint)
-
-        print(msg)
-
-    # Magic methods
-    # ======================================================================== #
-    def __str__(self):
-        lines = []
-
-        for addr in sorted(self._memory.keys()):
-            lines += ["0x%08x : 0x%08x" % (addr, self._memory[addr])]
-
-        return "\n".join(lines)
-
 
 class ReilCpuZeroDivisionError(Exception):
     pass
