@@ -94,6 +94,8 @@ class ReilMnemonic(object):
 
     # Extensions
     SEXT  = 19
+    SDIV  = 20
+    SMOD  = 21
 
     @staticmethod
     def to_string(mnemonic):
@@ -132,6 +134,8 @@ class ReilMnemonic(object):
 
             # Extensions
             ReilMnemonic.SEXT : "sext",
+            ReilMnemonic.SDIV : "sdiv",
+            ReilMnemonic.SMOD : "smod",
         }
 
         return strings[mnemonic]
@@ -173,6 +177,8 @@ class ReilMnemonic(object):
 
             # Added Instructions
             "sext" : ReilMnemonic.SEXT,
+            "sdiv" : ReilMnemonic.SDIV,
+            "smod" : ReilMnemonic.SMOD,
         }
 
         return mnemonics[string]
@@ -211,6 +217,8 @@ REIL_MNEMONICS = (
 
     # Extensions
     ReilMnemonic.SEXT,
+    ReilMnemonic.SDIV,
+    ReilMnemonic.SMOD,
 )
 
 class ReilInstruction(object):
@@ -334,6 +342,21 @@ class ReilInstruction(object):
     def __hash__(self):
         return hash(str(self))
 
+    def __getstate__(self):
+        state = {}
+        state['_mnemonic'] = self._mnemonic
+        state['_operands'] = self._operands
+        state['_comment'] = self._comment
+        state['_address'] = self._address
+
+        return state
+
+    def __setstate__(self, state):
+        self._mnemonic = state['_mnemonic']
+        self._operands = state['_operands']
+        self._comment = state['_comment']
+        self._address = state['_address']
+
 
 class ReilOperand(object):
 
@@ -345,7 +368,6 @@ class ReilOperand(object):
     ]
 
     def __init__(self, size):
-
         # Size of the operand, in bits.
         self._size = size
 
@@ -367,6 +389,15 @@ class ReilOperand(object):
 
     def __ne__(self, other):
         return not self.__eq__(other)
+
+    def __getstate__(self):
+        state = {}
+        state['_size'] = self._size
+
+        return state
+
+    def __setstate__(self, state):
+        self._size = state['_size']
 
 
 class ReilImmediateOperand(ReilOperand):
@@ -407,6 +438,18 @@ class ReilImmediateOperand(ReilOperand):
                 self._size == other._size and \
                 self._immediate == other._immediate
 
+    def __getstate__(self):
+        state = super(ReilImmediateOperand, self).__getstate__()
+
+        state['_immediate'] = self._immediate
+
+        return state
+
+    def __setstate__(self, state):
+        super(ReilImmediateOperand, self).__setstate__(state)
+
+        self._immediate = state['_immediate']
+
 
 class ReilRegisterOperand(ReilOperand):
 
@@ -436,6 +479,18 @@ class ReilRegisterOperand(ReilOperand):
         return  type(other) is type(self) and \
                 self._size == other._size and \
                 self._name == other._name
+
+    def __getstate__(self):
+        state = super(ReilRegisterOperand, self).__getstate__()
+
+        state['_name'] = self._name
+
+        return state
+
+    def __setstate__(self, state):
+        super(ReilRegisterOperand, self).__setstate__(state)
+
+        self._name = state['_name']
 
 
 class ReilEmptyOperand(ReilRegisterOperand):
@@ -571,6 +626,16 @@ class ReilInstructionBuilder(object):
 
         return self.build(ReilMnemonic.SEXT, src, empty_reg, dst)
 
+    def gen_sdiv(self, src1, src2, dst):
+        """Return a SDIV instruction.
+        """
+        return self.build(ReilMnemonic.SDIV, src1, src2, dst)
+
+    def gen_smod(self, src1, src2, dst):
+        """Return a SMOD instruction.
+        """
+        return self.build(ReilMnemonic.SMOD, src1, src2, dst)
+
     # Auxiliary functions
     # ======================================================================== #
     def build(self, mnemonic, oprnd1, oprnd2, oprnd3):
@@ -635,8 +700,24 @@ class DualInstruction(object):
     def __ne__(self, other):
         return not self.__eq__(other)
 
+    def __getstate__(self):
+        state = {}
+        state['_address'] = self._address
+        state['_asm_instr'] = self._asm_instr
+        state['_ir_instrs'] = self._ir_instrs
+
+        return state
+
+    def __setstate__(self, state):
+        self._address = state['_address']
+        self._asm_instr = state['_asm_instr']
+        self._ir_instrs = state['_ir_instrs']
+
 
 class ReilSequence(object):
+
+    """Reil instruction sequence.
+    """
 
     def __init__(self):
         self.__sequence = []
@@ -668,6 +749,10 @@ class ReilSequence(object):
 
     def __len__(self):
         return len(self.__sequence)
+
+    def __iter__(self):
+        for instr in self.__sequence:
+            yield instr
 
 
 class ReilContainerInvalidAddressError(Exception):
@@ -718,3 +803,8 @@ class ReilContainer(object):
             self.__container[base_addr].dump()
 
             print("-" * 80)
+
+    def __iter__(self):
+        for addr in sorted(self.__container.keys()):
+            for instr in self.__container[addr]:
+                yield instr

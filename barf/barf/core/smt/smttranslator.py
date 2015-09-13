@@ -93,7 +93,9 @@ class SmtTranslator(object):
             ReilMnemonic.SUB : self._translate_sub,
             ReilMnemonic.MUL : self._translate_mul,
             ReilMnemonic.DIV : self._translate_div,
+            ReilMnemonic.SDIV : self._translate_sdiv,
             ReilMnemonic.MOD : self._translate_mod,
+            ReilMnemonic.SMOD : self._translate_smod,
             ReilMnemonic.BSH : self._translate_bsh,
 
             # Bitwise Instructions
@@ -427,6 +429,19 @@ class SmtTranslator(object):
         op2_var = self._translate_src_oprnd(oprnd2)
         op3_var, _ = self._translate_dst_oprnd(oprnd3)
 
+        return [(op3_var == (op1_var.udiv(op2_var)))]
+
+    def _translate_sdiv(self, oprnd1, oprnd2, oprnd3):
+        """Return a formula representation of an DIV instruction.
+        """
+        assert oprnd1.size and oprnd2.size and oprnd3.size
+        assert oprnd1.size == oprnd2.size
+        assert oprnd2.size == oprnd3.size
+
+        op1_var = self._translate_src_oprnd(oprnd1)
+        op2_var = self._translate_src_oprnd(oprnd2)
+        op3_var, _ = self._translate_dst_oprnd(oprnd3)
+
         return [(op3_var == (op1_var / op2_var))]
 
     def _translate_mod(self, oprnd1, oprnd2, oprnd3):
@@ -442,6 +457,19 @@ class SmtTranslator(object):
 
         return [(op3_var == (op1_var % op2_var))]
 
+    def _translate_smod(self, oprnd1, oprnd2, oprnd3):
+        """Return a formula representation of an MOD instruction.
+        """
+        assert oprnd1.size and oprnd2.size and oprnd3.size
+        assert oprnd1.size == oprnd2.size
+        assert oprnd2.size == oprnd3.size
+
+        op1_var = self._translate_src_oprnd(oprnd1)
+        op2_var = self._translate_src_oprnd(oprnd2)
+        op3_var, _ = self._translate_dst_oprnd(oprnd3)
+
+        return [(op3_var == (op2_var.smod(op1_var)))]
+
     def _translate_bsh(self, oprnd1, oprnd2, oprnd3):
         """Return a formula representation of a BSH instruction.
         """
@@ -452,8 +480,21 @@ class SmtTranslator(object):
         op2_var = self._translate_src_oprnd(oprnd2)
         op3_var, _ = self._translate_dst_oprnd(oprnd3)
 
-        shl = smtlibv2.EXTRACT(op1_var >> (-op2_var), 0, op3_var.size)
-        shr = smtlibv2.EXTRACT(op1_var << op2_var, 0, op3_var.size)
+        if oprnd3.size > oprnd1.size:
+            op1_var_zx = smtlibv2.ZEXTEND(op1_var, oprnd3.size)
+            op2_var_zx = smtlibv2.ZEXTEND(op2_var, oprnd3.size)
+
+            op2_var_neg = (-op2_var)
+            op2_var_neg_sx = smtlibv2.SEXTEND(op2_var_neg, oprnd2.size, oprnd3.size)
+
+            shl = smtlibv2.EXTRACT(op1_var_zx >> op2_var_neg_sx, 0, op3_var.size)
+            shr = smtlibv2.EXTRACT(op1_var_zx << op2_var_zx, 0, op3_var.size)
+        elif oprnd3.size < oprnd1.size:
+            shl = smtlibv2.EXTRACT(op1_var >> (-op2_var), 0, op3_var.size)
+            shr = smtlibv2.EXTRACT(op1_var << op2_var, 0, op3_var.size)
+        else:
+            shl = op1_var >> (-op2_var)
+            shr = op1_var << op2_var
 
         return [(op3_var == smtlibv2.ITEBV(oprnd3.size, op2_var >= 0, shr, shl))]
 
@@ -686,7 +727,7 @@ class SmtTranslator(object):
         if oprnd1.size == oprnd3.size:
             expr = (op1_var == op3_var)
         elif oprnd1.size < oprnd3.size:
-            expr = (op1_var == smtlibv2.SEXTEND(op1_var, op3_var))
+            expr = (op3_var == smtlibv2.SEXTEND(op1_var, op1_var.size, op3_var.size))
 
             # Make sure that the values that can take dst operand
             # do not exceed the range of the source operand.
@@ -707,3 +748,5 @@ class SmtTranslator(object):
 
         if parent_reg_constrs:
             rv += parent_reg_constrs
+
+        return rv

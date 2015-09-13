@@ -23,7 +23,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import bisect
-import itertools
+import logging
 import networkx
 
 from Queue import Queue
@@ -37,11 +37,11 @@ from barf.core.reil import ReilMnemonic
 from barf.core.reil import ReilImmediateOperand
 
 # CFG recovery mode
-BARF_DISASM_LINEAR = 0       # linear sweep
-BARF_DISASM_RECURSIVE = 1    # recursive descent
-BARF_DISASM_MIXED = 2        # linear sweep + recursive descent
+BARF_DISASM_LINEAR = 0       # Linear Sweep
+BARF_DISASM_RECURSIVE = 1    # Recursive Descent
 
-verbose = False
+logger = logging.getLogger(__name__)
+
 
 class BasicBlock(object):
 
@@ -170,7 +170,7 @@ class BasicBlock(object):
     def contains(self, address):
         """Check if an address is within the range of a basic block.
         """
-        return address >= self.address and address <= self.end_address
+        return self.address <= address and address <= self.end_address
 
     def empty(self):
         """Check if a basic block is empty.
@@ -178,13 +178,18 @@ class BasicBlock(object):
         return len(self._instrs) == 0
 
     def __str__(self):
-        lines = ["Basic Block @ 0x%08x" % (self.address if self.address else 0)]
+        lines = ["Basic Block @ {:#x}".format(self.address if self.address else 0)]
 
-        for instr in self._instrs:
-            lines += ["    %s ; %s" % (str(instr.ir_instrs[0]).ljust(25), str(instr.asm_instr))]
+        asm_fmt = "{:#x}    {}"
+        reil_fmt = "{:#x}:{:02d} {}"
 
-            for ir_instr in instr.ir_instrs[1:]:
-                lines += ["    %s" % str(ir_instr)]
+        for dinstr in self._instrs:
+            asm_instr = dinstr.asm_instr
+
+            lines += [asm_fmt.format(asm_instr.address, asm_instr)]
+
+            for reil_instr in dinstr.ir_instrs:
+                lines += [reil_fmt.format(reil_instr.address >> 0x8, reil_instr.address & 0xff, reil_instr)]
 
         return "\n".join(lines)
 
@@ -195,6 +200,30 @@ class BasicBlock(object):
     def __ne__(self, other):
         return not self.__eq__(other)
 
+    def __iter__(self):
+        for instr in self._instrs:
+            yield instr
+
+    def __len__(self):
+        return len(self._instrs)
+
+    def __getstate__(self):
+        state = {}
+        state['_instrs'] = self._instrs
+        state['_address'] = self._address
+        state['_taken_branch'] = self._taken_branch
+        state['_not_taken_branch'] = self._not_taken_branch
+        state['_direct_branch'] = self._direct_branch
+
+        return state
+
+    def __setstate__(self, state):
+        self._instrs = state['_instrs']
+        self._address = state['_address']
+        self._taken_branch = state['_taken_branch']
+        self._not_taken_branch = state['_not_taken_branch']
+        self._direct_branch = state['_direct_branch']
+
 
 class BasicBlockGraph(object):
 
@@ -203,14 +232,22 @@ class BasicBlockGraph(object):
 
     def __init__(self, basic_blocks):
 
-        # List of basic blocks.
-        self._basic_blocks = basic_blocks
+        # List of basic blocks sorted by address.
+        self._basic_blocks = sorted(basic_blocks, key=lambda bb: bb.address)
 
         # Basic block accessed by address
         self._bb_by_addr = dict([(bb.address, bb) for bb in basic_blocks])
 
         # Basic block graph
-        self._graph = self._build_graph(basic_blocks)
+        self._graph = self._build_graph()
+
+		# List of entry basic blocks
+        self._entry_blocks = [bb.address for bb in basic_blocks
+                                if len(self._graph.in_edges(bb.address)) == 0]
+
+		# List of exit basic blocks
+        self._exit_blocks = [bb.address for bb in basic_blocks
+                                if len(self._graph.out_edges(bb.address)) == 0]
 
     def all_simple_bb_paths(self, start_address, end_address):
         """Return a list of path between start and end address.
@@ -218,74 +255,84 @@ class BasicBlockGraph(object):
         bb_start = self._find_basic_block(start_address)
         bb_end = self._find_basic_block(end_address)
 
-        paths = networkx.all_simple_paths(self._graph, \
-            source=bb_start.address, target=bb_end.address)
+        paths = networkx.all_simple_paths(self._graph, source=bb_start.address, target=bb_end.address)
 
-        return (map(lambda addr : self._bb_by_addr[addr], path) for path in paths)
+        return (map(lambda addr: self._bb_by_addr[addr], path) for path in paths)
 
     def save(self, filename, print_ir=False, format='dot'):
         """Save basic block graph into a file.
         """
         node_format = {
-            'shape' : 'Mrecord',
-            'rankdir' : 'LR',
+            'shape'    : 'Mrecord',
+            'rankdir'  : 'LR',
             'fontname' : 'monospace',
-            'fontsize' : '9.0'
+            'fontsize' : '9.0',
         }
 
         edge_format = {
             'fontname' : 'monospace',
-            'fontsize' : '8.0'
+            'fontsize' : '8.0',
         }
 
         edge_colors = {
-            'taken' : 'green',
+            'taken'     : 'green',
             'not-taken' : 'red',
-            'direct' : 'blue'
+            'direct'    : 'blue',
+        }
+
+        html_entities = {
+            "!" : "&#33;",
+            "#" : "&#35;",
+            ":" : "&#58;",
+            "{" : "&#123;",
+            "}" : "&#125;",
         }
 
         try:
-            # for each conneted component
-            for idx, gr in enumerate(networkx.connected_component_subgraphs(self._graph.to_undirected())):
-                graph = Dot(graph_type="digraph", rankdir="TB")
+            dot_graph = Dot(graph_type="digraph", rankdir="TB")
 
-                # add nodes
-                nodes = {}
-                for bb_addr in gr.node.keys():
-                    dump = self._dump_bb(self._bb_by_addr[bb_addr], print_ir)
+            # Add nodes.
+            nodes = {}
+            for bb_addr in self._bb_by_addr:
+                bb_dump = self._dump_bb(self._bb_by_addr[bb_addr], print_ir)
 
-                    # html-encode colon character
-                    dump = dump.replace("!", "&#33;")
-                    dump = dump.replace("#", "&#35;")
-                    dump = dump.replace(":", "&#58;")
-                    dump = dump.replace("{", "&#123;")
-                    dump = dump.replace("}", "&#125;")
+                # html-encode colon character
+                for char, encoding in html_entities.items():
+                    bb_dump = bb_dump.replace(char, encoding)
 
-                    label = "{<f0> 0x%08x | %s}" % (bb_addr, dump)
+                label = "{{<f0> {:#08x} | {}}}".format(bb_addr, bb_dump)
 
-                    nodes[bb_addr] = Node(bb_addr, label=label, **node_format)
+                nodes[bb_addr] = Node(bb_addr, label=label, **node_format)
 
-                    graph.add_node(nodes[bb_addr])
+                dot_graph.add_node(nodes[bb_addr])
 
-                # add edges
-                for bb_src_addr in gr.node.keys():
-                    for bb_dst_addr, branch_type in self._bb_by_addr[bb_src_addr].branches:
-                        graph.add_edge(Edge(nodes[bb_src_addr],
-                            nodes[bb_dst_addr], label=branch_type, \
-                            color=edge_colors[branch_type], **edge_format))
+            # Add edges.
+            for bb_src_addr in self._bb_by_addr:
+                for bb_dst_addr, branch_type in self._bb_by_addr[bb_src_addr].branches:
+                    # Skip jmp/jcc to sub routines.
+                    if not bb_dst_addr in self._bb_by_addr:
+                        continue
 
-                graph.write("%s_%03d.%s" % (filename, idx, format), format=format)
-        except Exception as err:
-            import traceback
-            import sys
-            print("[E] Error loading BARF (%s:%d) : '%s'" %
-                (__name__, sys.exc_traceback.tb_lineno, str(err)))
-            print("")
-            print(traceback.format_exc())
+                    dot_graph.add_edge(
+                        Edge(
+                            nodes[bb_src_addr],
+                            nodes[bb_dst_addr],
+                            color=edge_colors[branch_type],
+                            **edge_format))
+
+            # Save graph.
+            dot_graph.write("{}.{}".format(filename, format), format=format)
+        except Exception:
+            logger.error(
+                "Failed to save basic block graph: %s (%s)",
+                filename,
+                format,
+                exc_info=True
+            )
 
     # Auxiliary functions
     # ======================================================================== #
-    def _build_graph(self, basic_blocks):
+    def _build_graph(self):
         graph = networkx.DiGraph()
 
         # add nodes
@@ -312,23 +359,62 @@ class BasicBlockGraph(object):
     def _dump_bb(self, basic_block, print_ir=False):
         lines = []
 
-        base_addr = basic_block.instrs[0].address
+        asm_fmt = "{:#08x} [{:02d}] {}\\l"
+        reil_fmt = " {}\\l"
 
-        for instr in basic_block.instrs:
-            lines += ["0x%08x (%2d) " % (instr.address, instr.asm_instr.size) + str(instr.asm_instr) + "\\l"]
-            # lines += ["+%02x " % (instr.address - base_addr) + str(instr.asm_instr) + "\\l"]
-            # lines += [str(instr.asm_instr) + "\\l"]
+        for dinstr in basic_block:
+            lines += [asm_fmt.format(dinstr.address, dinstr.asm_instr.size, dinstr.asm_instr)]
 
             if print_ir:
-                for ir_instr in instr.ir_instrs:
-                    lines += ["              " + str(ir_instr) + "\\l"]
+                for ir_instr in dinstr.ir_instrs:
+                    lines += [reil_fmt.format(ir_instr)]
 
         return "".join(lines)
-
 
     @property
     def basic_blocks(self):
         return self._basic_blocks
+
+    def get_basic_block(self, address):
+        return self._bb_by_addr[address]
+
+    @property
+    def exit_basic_blocks(self):
+        for bb_addr in self._exit_blocks:
+            yield self._bb_by_addr[bb_addr]
+
+    @property
+    def entry_basic_blocks(self):
+        for bb_addr in self._entry_blocks:
+            yield self._bb_by_addr[bb_addr]
+
+    def __getstate__(self):
+        state = {}
+
+        state['_basic_blocks'] = self._basic_blocks
+
+        return state
+
+    def __setstate__(self, state):
+        basic_blocks = state['_basic_blocks']
+
+        # List of basic blocks sorted by address.
+        self._basic_blocks = sorted(basic_blocks, key=lambda bb: bb.address)
+
+        # Basic block accessed by address
+        self._bb_by_addr = dict([(bb.address, bb) for bb in basic_blocks])
+
+        # Basic block graph
+        self._graph = self._build_graph()
+
+        # List of entry basic blocks
+        self._entry_blocks = [bb.address for bb in basic_blocks
+                                if len(self._graph.in_edges(bb.address)) == 0]
+
+        # List of exit basic blocks
+        self._exit_blocks = [bb.address for bb in basic_blocks
+                                if len(self._graph.out_edges(bb.address)) == 0]
+
 
 class BasicBlockBuilder(object):
 
@@ -349,7 +435,7 @@ class BasicBlockBuilder(object):
         # Memory of the program being analyze.
         self._mem = memory
 
-    def build(self, start_address, end_address):
+    def build(self, start_address, end_address, symbols=None):
         """Return the list of basic blocks.
 
         Linear Sweep Disassembly.
@@ -360,51 +446,38 @@ class BasicBlockBuilder(object):
         disassembling basic blocks.
 
         """
-        if verbose:
-            print("[+] Recovering Basic Blocks :")
+        if not symbols:
+            symbols = {}
 
-        if verbose:
-            print("      Finding candidate BBs...")
-        bbs = self._find_candidate_bbs(start_address, end_address)
-        if verbose:
-            print("        %d" % len(bbs))
+        # 1.
+        # bbs = self._find_candidate_bbs(start_address, end_address, symbols=symbols)
+        # bbs = self._refine_bbs(bbs, symbols)
 
-        # print "      Number of instrs..."
-        # asm_count = 0
-        # ir_count = 0
-        # for bb in bbs:
-        #     asm_count += len(bb.instrs)
-        #     ir_count += sum(map(lambda i : len(i.ir_instrs), bb.instrs))
+        # 2.
+        bbs = self._find_candidate_bbs(start_address, end_address, symbols=symbols)
+        bbs = self._refine_bbs(bbs, symbols)
 
-        # print "        asm : %d" % asm_count
-        # print "        ir  : %d" % ir_count
+        # Collect subroutine address
+        addrs = []
+        for bb in bbs:
+            for addr, _ in bb.branches:
+                if not (start_address <= addr and addr <= end_address):
+                    addrs.append(addr)
+        addrs = sorted(list(set(addrs)))
 
-        if verbose:
-            print("      Refining BBs...")
-        bbs = self._refine_bbs(bbs)
-        if verbose:
-            print("        %d" % len(bbs))
+        # Process subrutines
+        bbs_new = []
+        for addr in addrs:
+            bbs_new += self._find_candidate_bbs(addr, end_address, symbols=symbols)
 
-        # print "      Checking gaps..."
-        # for curr, next in zip(bbs[:-1], bbs[1:]):
-        #     if curr.address + curr.size != next.address:
-        #         print "gap found @ %s" % hex(curr.address + curr.size)
-
-        if verbose:
-            print("      Stripping BBs...")
-        bbs = self._strip_bbs(bbs)
-        if verbose:
-            print("        %d" % len(bbs))
-
-        if verbose:
-            print("      Updating branches...")
-        self._update_branches(bbs)
-        if verbose:
-            print("        %d" % len(bbs))
+        bbs = self._refine_bbs(bbs_new + bbs, symbols)
 
         return bbs
 
-    def _find_candidate_bbs(self, start_address, end_address, mode=BARF_DISASM_MIXED):
+    def _find_candidate_bbs(self, start_address, end_address, mode=BARF_DISASM_RECURSIVE, symbols=None):
+        if not symbols:
+            symbols = {}
+
         bbs = []
 
         addrs_to_process = Queue()
@@ -413,55 +486,62 @@ class BasicBlockBuilder(object):
         addrs_to_process.put(start_address)
 
         while not addrs_to_process.empty():
-            curr_addr = addrs_to_process.get()
+            addr_curr = addrs_to_process.get()
 
-            # there no standard way to check if an item is in the queue
-            # before pushing it in. So, it is necesary to check if the pop
-            # address have already been processed.
-            if curr_addr in addrs_processed:
+            # Skip current address if:
+            #   a. it has already been processed or
+            #   b. it is not within range ([start_address, end_address]) or
+            if  addr_curr in addrs_processed or \
+                not (addr_curr >= start_address and addr_curr <= end_address):
                 continue
 
-            # print "curr_addr : ", hex(curr_addr)
-
-            bb = self._disassemble_bb(curr_addr, end_address + 0x1)
+            bb = self._disassemble_bb(addr_curr, end_address + 0x1, symbols)
 
             if bb.empty():
-                # print " empty bb"
                 continue
 
-            # print " valid bb"
-
-            # add bb to the list
+            # Add new basic block to the list.
             bbs += [bb]
-            addrs_processed.add(curr_addr)
 
-            # linear sweep mode: add next addr to process queue
-            if mode in [BARF_DISASM_LINEAR, BARF_DISASM_MIXED]:
+            # Add current address to the list of processed addresses.
+            addrs_processed.add(addr_curr)
+
+            # Linear sweep mode: add next address to process queue.
+            if mode == BARF_DISASM_LINEAR:
                 next_addr = bb.address + bb.size
 
-                # print "next_addr : ", hex(next_addr)
-
-                if next_addr < end_address and not next_addr in addrs_processed:
+                if  not self._bb_ends_in_direct_jmp(bb) and \
+                    not self._bb_ends_in_return(bb) and \
+                    not next_addr in addrs_processed:
                     addrs_to_process.put(next_addr)
 
-            # recursive descent mode: add branches to process queue
-            if mode in [BARF_DISASM_RECURSIVE, BARF_DISASM_MIXED]:
-                for addr, branch_type in bb.branches:
+            # Recursive descent mode: add branches to process queue.
+            if mode == BARF_DISASM_RECURSIVE:
+                for addr, _ in bb.branches:
                     if not addr in addrs_processed:
                         addrs_to_process.put(addr)
 
         return bbs
 
-    def _refine_bbs(self, bbs):
-        bbs.sort(key=lambda x : x.address)
-        bbs_addrs = map(lambda x : x.address, bbs)
+    def _bb_ends_in_direct_jmp(self, bb):
+        last_instr = bb.instrs[-1].ir_instrs[-1]
+
+        return  last_instr.mnemonic == ReilMnemonic.JCC and \
+                isinstance(last_instr.operands[0], ReilImmediateOperand) and \
+                last_instr.operands[0].immediate == 0x1
+
+    def _bb_ends_in_return(self, bb):
+        last_instr = bb.instrs[-1].ir_instrs[-1]
+
+        return last_instr.mnemonic == ReilMnemonic.RET
+
+    def _refine_bbs(self, bbs, symbols):
+        bbs.sort(key=lambda x: x.address)
+        bbs_addrs = [bb.address for bb in bbs]
 
         bbs_new = []
 
-        for idx, bb1 in enumerate(bbs):
-            # sys.stdout.write("\r      Processing : %d/%d" % (idx, len(bbs)))
-            # sys.stdout.flush()
-
+        for bb1 in bbs:
             bb_divided = False
 
             lower = bisect.bisect_left(bbs_addrs, bb1.start_address)
@@ -469,85 +549,41 @@ class BasicBlockBuilder(object):
 
             for bb2 in bbs[lower:upper]:
                 if bb1.contains(bb2.address) and bb1 != bb2:
-                    # print "split!!", hex(bb2.address)
+                    bb_lower, bb_upper = self._split_bb(bb1, bb2.address, symbols)
 
-                    bba = self._divide_bb(bb1, bb2.address)
+                    if not bb_upper.empty() and bb_upper not in bbs_new:
+                        bbs_new += [bb_upper]
 
-                    if len(bba.instrs) > 0 and bba not in bbs_new:
-                        bbs_new += [bba]
+                    bb1 = bb_lower
 
                     bb_divided = True
 
                     break
 
             if not bb_divided:
-                if bb1 not in bbs_new:
+                if not bb1.empty() and not bb1 in bbs_new:
                     bbs_new += [bb1]
 
         return bbs_new
 
-    def _strip_bbs(self, bbs):
-        return [bb for bb in map(self._strip_bb, bbs) if len(bb.instrs) > 0]
+    def _split_bb(self, bb, address, symbols):
+        bb_upper_half = self._disassemble_bb(bb.start_address, address, symbols)
+        bb_lower_half = self._disassemble_bb(address, bb.end_address, symbols)
 
-    def _update_branches(self, bbs):
-        bb_addrs = [bb.address for bb in bbs]
+        bb_upper_half.direct_branch = address
 
-        for bb in bbs:
-            if not bb.taken_branch in bb_addrs:
-                bb.taken_branch = None
-            if not bb.not_taken_branch in bb_addrs:
-                bb.not_taken_branch = None
-            if not bb.direct_branch in bb_addrs:
-                bb.direct_branch = None
+        return bb_lower_half, bb_upper_half
 
-    def _strip_bb(self, bb):
-        # top
-        while len(bb.instrs) > 0:
-            if bb.instrs[0].ir_instrs[0].mnemonic == ReilMnemonic.NOP:
-                del bb.instrs[0]
-            else:
-                break
-
-        # bottom
-        while len(bb.instrs) > 0:
-            if bb.instrs[-1].ir_instrs[0].mnemonic == ReilMnemonic.NOP:
-                del bb.instrs[-1]
-            else:
-                break
-
-        return bb
-
-    def _divide_bb(self, bb, address):
-        bb_new = BasicBlock()
-
-        for dinstr in bb.instrs:
-            if dinstr.address == address:
-                break
-
-            bb_new.instrs.append(dinstr)
-
-        bb_new.direct_branch = address
-
-        return bb_new
-
-    def _disassemble_bb(self, start_address, end_address):
-        bb_current = BasicBlock()
-
-        if start_address > end_address:
-            return bb_current
-
+    def _disassemble_bb(self, start_address, end_address, symbols):
+        bb = BasicBlock()
         addr = start_address
-
-        taken = None
-        not_taken = None
-        direct = None
+        taken, not_taken, direct = None, None, None
 
         while addr < end_address:
-            start, end = addr, min(addr + self._lookahead_max, end_address)
-
             try:
+                start, end = addr, min(addr + self._lookahead_max, end_address)
                 data_chunk = self._mem[start:end]
-            except:
+            except Exception:
                 # TODO: Log error.
                 break
 
@@ -558,77 +594,83 @@ class BasicBlockBuilder(object):
 
             ir = self._ir_trans.translate(asm)
 
-            bb_current.instrs.append(DualInstruction(addr, asm, ir))
+            bb.instrs.append(DualInstruction(addr, asm, ir))
 
-            # if there is an 'end' instruction process it accordingly
+            # TODO: Process instructions without resorting to
+            # asm.mnemonic or asm.prefix.
+
+            # If it is a RET instruction, break.
             if ir[-1].mnemonic == ReilMnemonic.RET:
                 break
 
-            # TODO: Manage 'call' instruction properly (without
-            # resorting to 'asm.mnemonic == "call"').
-            if ir[-1].mnemonic == ReilMnemonic.JCC and not asm.mnemonic == "call":
-                taken, not_taken, direct = self._extract_branches(addr, asm, asm.size, ir)
+            # If it is a x86 hlt instruction, break.
+            if asm.mnemonic == "hlt":
                 break
 
-            # if ir[-1].mnemonic == ReilMnemonic.JCC and asm.mnemonic == "call":
-            #     direct_branch = addr + asm.size
-            #     break
+            # If callee does not return, break.
+            if  ir[-1].mnemonic == ReilMnemonic.JCC and \
+                asm.mnemonic == "call" and \
+                isinstance(ir[-1].operands[2], ReilImmediateOperand) and \
+                (ir[-1].operands[2].immediate >> 0x8) in symbols and \
+                not symbols[ir[-1].operands[2].immediate >> 0x8][2]:
+                break
 
-            # update instruction pointer and iterate
+            # If it is a JCC instruction, process it and break.
+            if  ir[-1].mnemonic == ReilMnemonic.JCC and \
+                not asm.mnemonic == "call" and \
+                not asm.prefix in ["rep", "repe", "repne", "repz"]:
+                taken, not_taken, direct = self._extract_branches(asm, ir)
+                break
+
+            # Update instruction pointer and iterate.
             addr += asm.size
 
-        bb_current.taken_branch = taken
-        bb_current.not_taken_branch = not_taken
-        bb_current.direct_branch = direct
+        bb.taken_branch = taken
+        bb.not_taken_branch = not_taken
+        bb.direct_branch = direct
 
-        # print "bb addr : ", hex(bb_current.address), " bb end addr : ", hex(bb_current.end_address)
-        # print " taken :", hex(taken) if taken else ""
-        # print " not_taken :", hex(not_taken) if not_taken else ""
-        # print " direct :", hex(direct) if direct else ""
+        return bb
 
-        return bb_current
+    def _resolve_branch_address(self, branch_instr, instrs):
+        target = branch_instr.operands[2]
 
-    def _resolve_branch_address(self, jmp_instr, instrs):
-        dst = jmp_instr.operands[2]
-
-        if isinstance(dst, ReilImmediateOperand):
+        if isinstance(target, ReilImmediateOperand):
             # branch address is an immediate
             # Transform Reil address back to source arch address
-            return dst.immediate >> 8
+            return target.immediate >> 8
         else:
             # try to resolve branch address
             for instr in instrs[::-1]:
                 if instr.mnemonic == ReilMnemonic.STR and \
                     isinstance(instr.operands[0], ReilImmediateOperand) and \
-                    instr.dst == dst:
+                    instr.operands[2] == target:
 
                     # Transform Reil address back to source arch address
                     return instr.operands[0].immediate >> 8
 
-    def _extract_branches(self, addr, asm, size, ir):
-        taken_branch = None
-        not_taken_branch = None
-        direct_branch = None
+    def _extract_branches(self, asm, ir):
+        taken_branch, not_taken_branch, direct_branch = None, None, None
 
         instr_last = ir[-1]
 
         if instr_last.mnemonic == ReilMnemonic.JCC:
             cond = instr_last.operands[0]
-            dst = instr_last.operands[2]
 
             branch_addr = self._resolve_branch_address(instr_last, ir)
 
-            # set branch address according to its type
+            # Set branch address according to its type
             if isinstance(cond, ReilImmediateOperand):
                 if cond.immediate == 0x0:
-                    taken_branch = addr + size
                     not_taken_branch = branch_addr
-                if cond.immediate == 0x1 and asm.mnemonic == 'call':
-                    direct_branch = addr + size
-                if cond.immediate == 0x1 and asm.mnemonic != 'call':
-                    direct_branch = branch_addr
+
+                if cond.immediate == 0x1:
+                    if asm.mnemonic == 'call':
+                        direct_branch = asm.address + asm.size
+
+                    if asm.mnemonic != 'call':
+                        direct_branch = branch_addr
             else:
                 taken_branch = branch_addr
-                not_taken_branch = addr + size
+                not_taken_branch = asm.address + asm.size
 
         return taken_branch, not_taken_branch, direct_branch
