@@ -28,6 +28,7 @@ BARF : Binary Analysis Framework.
 """
 import logging
 import os
+import sys
 import time
 
 import arch
@@ -49,6 +50,8 @@ from core.bi import BinaryFile
 from core.reil import ReilEmulator
 from core.smt.smtlibv2 import CVC4Solver
 from core.smt.smtlibv2 import Z3Solver
+from core.dbg.debugger import ProcessControl, ProcessExit, ProcessSignal, ProcessEnd
+from core.dbg.testcase import GetTestcase, prepare_inputs
 from core.smt.smttranslator import SmtTranslator
 
 logger = logging.getLogger(__name__)
@@ -161,18 +164,57 @@ class BARF(object):
 
     # ======================================================================== #
 
-    def open(self, filename):
+    def open(self, path):
         """Open a file for analysis.
 
         :param filename: name of an executable file
         :type filename: str
 
         """
+        self.testcase = None
+
+        if os.path.isdir(path):
+            self.testcase = GetTestcase(path)
+            filename = self.testcase["filename"]
+        else:
+            filename = path
+
         if filename:
             self.binary = BinaryFile(filename)
             self.text_section = self.binary.text_section
 
             self._load()
+
+    def execute(self,ea_start=None, ea_end=None):
+        if self.testcase is None:
+            print "No testcase specified. Execution impossible"
+            sys.exit(-1)
+
+        binary = self.binary
+        args = prepare_inputs(self.testcase["args"] + self.testcase["files"])
+        pcontrol = ProcessControl()
+        process = pcontrol.start_process(binary,args,ea_start,ea_end)
+
+        self.ir_translator.reset()
+
+        while pcontrol:
+            addr = process.getInstrPointer()
+            ins = process.readBytes(addr, 20)
+
+            asm = self.disassembler.disassemble(ins, addr)
+            yield addr-asm.size, asm, self.ir_translator.translate(asm)
+
+            process.singleStep()
+            event = pcontrol.wait_event()
+            if isinstance(event, ProcessExit):
+                print "process exit"
+                break
+            if isinstance(event, ProcessEnd):
+                print "process end"
+                break
+            #if (isinstance(event, ProcessSignal) and
+            #    event.signum & ~128 != signal.SIGTRAP):
+            #    print "died with signal %i" % event.signum
 
     def translate(self, ea_start=None, ea_end=None):
         """Translate to REIL instructions.
@@ -261,6 +303,45 @@ class BARF(object):
         bb_list = self.bb_builder.build(start_addr, end_addr)
 
         return bb_list
+
+    def emulate_reil(self, context, instrs):
+        """Emulate REIL instructions.
+
+        :param context: processor context
+        :type context: dict
+
+        :returns: a context
+        :rtype: dict
+
+        """
+        start_addr = instrs[0].address#ea_start if ea_start else self.binary.ea_start
+        end_addr = instrs[-1].address#ea_end if ea_end else self.binary.ea_end
+
+        # load registers
+        if 'registers' in context:
+            for reg, val in context['registers'].items():
+                self.ir_emulator.registers[reg] = val
+
+        # load memory
+        if 'memory' in context:
+            for addr, val in context['memory'].items():
+                self.ir_emulator.memory.write(addr, 32, val)
+
+        #instrs = [reil for _, _, reil in self.translate(ea_start, ea_end)]
+
+        self.ir_emulator.execute([instrs], start_addr, end_address=end_addr)
+
+        context_out = {}
+
+        # save registers
+        context_out['registers'] = {}
+        for reg, val in self.ir_emulator.registers.items():
+            context_out['registers'][reg] = val
+
+        # save memory
+        context_out['memory'] = {}
+
+        return context_out
 
     def emulate_full(self, context, ea_start=None, ea_end=None):
         """Emulate REIL instructions.
