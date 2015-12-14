@@ -32,9 +32,12 @@ from pydot import Dot
 from pydot import Edge
 from pydot import Node
 
+from barf.arch import ARCH_ARM
+from barf.arch import ARCH_X86
 from barf.core.reil import DualInstruction
 from barf.core.reil import ReilMnemonic
 from barf.core.reil import ReilImmediateOperand
+from barf.arch.arm.armdisassembler import InvalidDisassemblerData, CapstoneOperandNotSupported
 
 # CFG recovery mode
 BARF_DISASM_LINEAR = 0       # Linear Sweep
@@ -421,12 +424,12 @@ class BasicBlockBuilder(object):
     """Basic block builder.
     """
 
-    def __init__(self, disassembler, memory, translator):
+    def __init__(self, disassembler, memory, translator, arch_info):
 
         # An instance of a disassembler.
         self._disasm = disassembler
 
-        # And instance of a REIL translator.
+        # An instance of a REIL translator.
         self._ir_trans = translator
 
         # Maximun number of bytes that gets from memory to disassemble.
@@ -434,6 +437,9 @@ class BasicBlockBuilder(object):
 
         # Memory of the program being analyze.
         self._mem = memory
+
+        # Architecture information of the binary.
+        self._arch_info = arch_info
 
     def build(self, start_address, end_address, symbols=None):
         """Return the list of basic blocks.
@@ -587,7 +593,10 @@ class BasicBlockBuilder(object):
                 # TODO: Log error.
                 break
 
-            asm = self._disasm.disassemble(data_chunk, addr)
+            try:
+                asm = self._disasm.disassemble(data_chunk, addr)
+            except (InvalidDisassemblerData, CapstoneOperandNotSupported):
+                break
 
             if not asm:
                 break
@@ -618,8 +627,22 @@ class BasicBlockBuilder(object):
             # If it is a JCC instruction, process it and break.
             if  ir[-1].mnemonic == ReilMnemonic.JCC and \
                 not asm.mnemonic == "call" and \
+                not asm.mnemonic == "blx" and \
+                not asm.mnemonic == "bl" and \
                 not asm.prefix in ["rep", "repe", "repne", "repz"]:
                 taken, not_taken, direct = self._extract_branches(asm, ir)
+                break
+
+            # Process ARM instrs: pop reg, {reg*, pc}
+            if  self._arch_info == ARCH_ARM and \
+                asm.mnemonic == "pop" and \
+                "pc" in str(asm.operands[1]):
+                break
+
+            # Process ARM instrs: ldr pc, *
+            if  self._arch_info == ARCH_ARM and \
+                asm.mnemonic == "ldr" and \
+                "pc" in str(asm.operands[0]):
                 break
 
             # Update instruction pointer and iterate.

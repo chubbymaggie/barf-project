@@ -37,10 +37,10 @@ import re
 from barf.analysis.gadget import GadgetType
 from barf.analysis.gadget import RawGadget
 from barf.arch import ARCH_ARM
-from barf.arch import ARCH_ARM_MODE_32
 from barf.arch import ARCH_X86
 from barf.arch.x86.x86translator import FULL_TRANSLATION
 from barf.arch.x86.x86translator import LITE_TRANSLATION
+from barf.core.disassembler import InvalidDisassemblerData
 from barf.core.reil import DualInstruction
 from barf.core.reil import ReilMnemonic
 from barf.core.reil import ReilRegisterOperand
@@ -84,7 +84,7 @@ class GadgetFinder(object):
 
         if self._architecture == ARCH_X86:
             candidates = self._find_x86_candidates(start_address, end_address)
-        elif self._architecture == ARCH_ARM and self._architecture_mode == ARCH_ARM_MODE_32:
+        elif self._architecture == ARCH_ARM:
             candidates = self._find_arm_candidates(start_address, end_address)
         else:
             raise Exception("Architecture not supported.")
@@ -207,7 +207,8 @@ class GadgetFinder(object):
         for addr in gadget_tail_addr:
             asm_instr = self._disasm.disassemble(
                 self._mem[addr:min(addr+4, end_address + 1)], # TODO: Add thumb (+16)
-                addr
+                addr,
+                architecture_mode=self._architecture_mode
             )
 
             if not asm_instr:
@@ -254,7 +255,14 @@ class GadgetFinder(object):
 
             raw_bytes = self._mem[start_addr:end_addr]
 
-            asm_instr = self._disasm.disassemble(raw_bytes, start_addr)
+            # TODO: Improve this code.
+            if self._architecture == ARCH_ARM:
+                try:
+                    asm_instr = self._disasm.disassemble(raw_bytes, start_addr, architecture_mode=self._architecture_mode)
+                except InvalidDisassemblerData:
+                    continue
+            else:
+                asm_instr = self._disasm.disassemble(raw_bytes, start_addr)
 
             if not asm_instr or asm_instr.size != step:
                 continue
