@@ -653,6 +653,8 @@ class ReilCpu(object):
 
         self.write_operand(instr.operands[2], op2_val)
 
+        return None
+
     # Data transfer instructions
     # ======================================================================== #
     def __execute_ldm(self, instr):
@@ -967,6 +969,8 @@ class ReilEmulator(object):
             try:
                 instr = container.fetch(ip)
             except ReilContainerInvalidAddressError:
+                logger.info("Invalid address: {:#010x}:{:#02x}".format(ip >> 8, ip & 0xff))
+
                 raise ReilCpuInvalidAddressError()
 
             next_ip = self.__cpu.execute(instr)
