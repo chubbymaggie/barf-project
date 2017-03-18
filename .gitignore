@@ -1,0 +1,17 @@
+# Compiled Python files.
+*.pyc
+
+# Python egg metadata, regenerated from source files by setuptools.
+*.egg-info
+
+# Build folder from Docs.
+doc/_build/*
+
+# Dependencies folder.
+dependencies
+
+# Log files
+*.log
+
+# PyCharm files.
+.idea/*
